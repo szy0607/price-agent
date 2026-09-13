@@ -26,14 +26,20 @@ jobs:
       # 且本项目依赖量小，缓存收益可忽略，故每次全量拉取最稳。
       - name: Clean npm cache
         run: npm cache clean --force
-      - run: npm ci
-      - run: npm run build
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend-web
+      - name: Build
+        run: npm run build
+        working-directory: frontend-web
       # SPA 兜底：history 路由在 GitHub Pages 下刷新/直达子路由时回退到 index.html
-      - run: cp dist/index.html dist/404.html
+      - name: SPA fallback (404.html)
+        run: cp dist/index.html dist/404.html
+        working-directory: frontend-web
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: frontend-web/dist
 
   deploy:
     needs: build

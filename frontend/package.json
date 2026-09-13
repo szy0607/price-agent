@@ -1,0 +1,21 @@
+{
+  "name": "price-agent-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "智能导购 Agent（购物决策助手）网页版 Demo - 静态前端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vant": "^4.9.14",
+    "vue": "^3.4.38",
+    "vue-router": "^4.4.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.2",
+    "vite": "^5.4.2"
+  }
+}

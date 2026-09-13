@@ -1,27 +1,28 @@
-# 智能导购 Agent · 网页版前端
+# 智能电商采购 Agent
 
-桌面优先的对话式购物决策助手 Demo（Vue 3 + Vite 5 + Tailwind 4 + Phosphor Icons）。
+个人定制购物助手：通过对话理解用户需求（预算、平台偏好、学生身份、性价比/品质取向），聚合淘宝 / 京东 / 拼多多三平台价格与优惠，输出比价、领券口令与购买建议。
 
-> 设计文档：`智能电商采购Agent-设计方案.md`（v0.4）｜项目进度：`.agent`
+## 项目结构
 
-## 功能
+```
+├── frontend-web/          # 网页版（Vue 3 + Vite，GitHub Pages 部署）
+├── frontend/              # 移动版（Vant 版，Vue 3）
+└── 智能电商采购Agent-设计方案.md   # 设计方案文档
+```
 
-- **智能咨询**（`/chat`）：粘贴商品链接 / 上传商品图片 / 直接提问，Mock 链路输出 情报卡 → 对比摘要 → 推荐结论 → 复制口令
-- **款式对比**（`/compare`）：双价矩阵（公开价 A / 领券价 B）+ 规格表 + 券明细 + 对比结论
-- **领券指引**（`/coupon`）：券类型、分平台领券步骤、权益矩阵、复制口令跳转 App
+## 在线访问
 
-## 本地开发
+网页版部署于 GitHub Pages：https://szy0607.github.io/price-agent-web/
+
+## 本地开发（网页版）
 
 ```bash
+cd frontend-web
 npm install
-npm run dev      # http://localhost:5175
-npm run build    # 产物 dist/
+npm run dev      # 开发服务器 http://localhost:5174
+npm run build    # 构建产物 dist/
 ```
 
 ## 部署
 
-推送到 GitHub 后，仓库 Actions 自动构建并发布到 GitHub Pages（需在 Settings → Pages 选择 "GitHub Actions" 作为发布来源）。
-
-## 合规说明
-
-本工具仅做信息聚合与决策建议：不代下单、不代支付、不提供 CPS 推广链接；价格与券信息以平台页面实时展示为准。
+推送到 `main` 分支后，GitHub Actions（`.github/workflows/deploy.yml`）自动构建 `frontend-web` 并部署到 GitHub Pages。

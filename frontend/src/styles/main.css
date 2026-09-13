@@ -1,0 +1,97 @@
+/* 全局样式：移动优先 */
+:root {
+  --brand: #3b7cff;
+  --brand-light: #ecf2ff;
+  --brand-deep: #1f4fd8;
+  --ink: #1c2333;
+  --ink-2: #5b6478;
+  --ink-3: #98a0b3;
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --line: #e8ecf4;
+  --price-a: #ff6034;
+  --price-b: #0abf7e;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
+    'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  padding: 12px 12px 24px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-label {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin: 16px 4px 8px;
+  letter-spacing: 1px;
+}
+
+.disclaimer {
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.7;
+  text-align: center;
+  padding: 8px 12px 4px;
+}
+
+/* 双价标签 */
+.price-a {
+  color: var(--price-a);
+  font-weight: 700;
+}
+.price-b {
+  color: var(--price-b);
+  font-weight: 700;
+}
+
+.tag-soft {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand-light);
+  color: var(--brand-deep);
+}
