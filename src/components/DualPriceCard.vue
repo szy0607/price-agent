@@ -1,14 +1,21 @@
 <script setup>
 import { computed } from 'vue'
 import { PhSealCheck, PhTag } from '@phosphor-icons/vue'
-import { PLATFORMS, cheapest } from '../mock/data'
+import { PLATFORMS, PLAT_KEYS, cheapest } from '../mock/data'
 
 const props = defineProps({
   product: { type: Object, required: true },
+  plat: { type: String, default: 'jd' },
 })
+const emit = defineEmits(['update:plat'])
 
-const best = computed(() => cheapest(props.product))
-const plat = computed(() => PLATFORMS[props.product.platform])
+const platTabs = PLAT_KEYS.map((k) => ({ key: k, name: PLATFORMS[k].name, accent: PLATFORMS[k].accent }))
+const best = computed(() => cheapest(props.product, props.plat))
+const platInfo = computed(() => PLATFORMS[props.plat])
+
+function setPlat(k) {
+  emit('update:plat', k)
+}
 </script>
 
 <template>
@@ -18,19 +25,25 @@ const plat = computed(() => PLATFORMS[props.product.platform])
       <img :src="product.image" :alt="product.name" class="h-16 w-16 rounded-xl object-cover" loading="lazy" />
       <div class="min-w-0">
         <div class="truncate text-[15px] font-semibold tracking-tight">{{ product.name }}</div>
-        <div class="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-          <span
-            class="rounded-md px-1.5 py-0.5 font-medium"
-            :style="{ color: plat.accent, backgroundColor: plat.accent + '14' }"
-          >
-            {{ plat.name }}
-          </span>
-          <span>{{ product.sales }}</span>
-        </div>
+        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{{ product.brand }} · {{ product.model }}</div>
       </div>
     </div>
 
-    <!-- 双价矩阵 -->
+    <!-- 平台切换：三平台价格 tab -->
+    <div class="flex gap-1 border-b border-zinc-100 p-3 dark:border-zinc-800">
+      <button
+        v-for="t in platTabs"
+        :key="t.key"
+        class="flex-1 rounded-lg px-2 py-1.5 text-[13px] font-medium transition-colors"
+        :class="plat === t.key ? 'text-white' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'"
+        :style="plat === t.key ? { backgroundColor: t.accent } : {}"
+        @click="setPlat(t.key)"
+      >
+        {{ t.name }}
+      </button>
+    </div>
+
+    <!-- 双价矩阵（按当前平台） -->
     <div class="p-5">
       <div class="grid grid-cols-[1.5fr_1fr_1fr] gap-x-3 pb-2 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span>款式</span>
@@ -45,14 +58,20 @@ const plat = computed(() => PLATFORMS[props.product.platform])
         <span class="flex items-center gap-1.5 truncate">
           <span class="truncate">{{ s.name }}</span>
           <span
-            v-if="s.coupon.type === 'channel'"
+            v-if="s.prices[plat].coupon.type === 'channel'"
             class="shrink-0 rounded-md bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-400/15 dark:text-amber-300"
           >
             专享
           </span>
+          <span
+            v-if="s.prices[plat].subsidy"
+            class="shrink-0 rounded-md border border-red-300 px-1 py-0.5 text-[10px] font-medium text-red-600 dark:border-red-500/50 dark:text-red-400"
+          >
+            补贴
+          </span>
         </span>
-        <span class="text-right font-mono text-price-a dark:text-red-400">¥{{ s.priceA }}</span>
-        <span class="text-right font-mono font-semibold text-price-b dark:text-emerald-400">¥{{ s.priceB }}</span>
+        <span class="text-right font-mono text-price-a dark:text-red-400">¥{{ s.prices[plat].a }}</span>
+        <span class="text-right font-mono font-semibold text-price-b dark:text-emerald-400">¥{{ s.prices[plat].b }}</span>
       </div>
     </div>
 
@@ -60,15 +79,18 @@ const plat = computed(() => PLATFORMS[props.product.platform])
     <div class="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/70 px-5 py-3.5 dark:border-zinc-800 dark:bg-zinc-800/40">
       <span class="flex items-center gap-1.5 text-[13px] text-zinc-600 dark:text-zinc-300">
         <PhSealCheck :size="16" weight="fill" class="text-price-b dark:text-emerald-400" />
-        最低到手：{{ best.name }}
+        {{ platInfo.name }}最低到手：{{ best.name }}
       </span>
-      <span class="font-mono text-lg font-bold text-price-b dark:text-emerald-400">¥{{ best.priceB }}</span>
+      <span class="font-mono text-lg font-bold text-price-b dark:text-emerald-400">¥{{ best.prices[plat].b }}</span>
     </div>
 
     <!-- 券说明 -->
     <div class="flex items-start gap-2 border-t border-zinc-100 px-5 py-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
       <PhTag :size="14" class="mt-0.5 shrink-0" />
-      <span>{{ best.coupon.name }}：{{ best.coupon.threshold ? `满 ${best.coupon.threshold} 减 ` : '立减 ' }}{{ best.coupon.amount }}。{{ best.coupon.note }}</span>
+      <span>
+        {{ best.prices[plat].coupon.name }}：{{ best.prices[plat].coupon.threshold ? `满 ${best.prices[plat].coupon.threshold} 减 ` : '立减 ' }}{{ best.prices[plat].coupon.amount }}。{{ best.prices[plat].coupon.note }}
+        <template v-if="best.prices[plat].plus">PLUS 价 ¥{{ best.prices[plat].plus }}</template>
+      </span>
     </div>
   </div>
 </template>
