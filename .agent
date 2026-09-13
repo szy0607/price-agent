@@ -1,0 +1,84 @@
+# .agent — 项目进度与技术备忘（供其他 Agent 读取）
+
+> 最后更新：2026-09-13（第三轮：三点改造——真实品牌商品 + 三平台价格 + 个人购物助手画像）
+> 填写模型：GLM-5.3-Flash（builtin:zai-start-plan/GLM-5.3-Flash，ZCode 会话）+ Doubao MainAgent（2026-09-13 收尾）
+> 用途：跨 Agent 协作的进度快照与技术坑记录。每次大的改动后请追加/更新对应小节，注明模型名与日期。
+
+---
+
+## 1. 项目一句话
+
+智能导购 Agent（购物决策助手）——网页版（桌面优先）的对话式购物咨询 Demo：款式对比、双价测算（公开价 A / 领券价 B）、领券指引。交易 100% 由用户完成，系统零交易动作。需求源文件：`智能电商采购Agent-设计方案.md`（v0.4）。
+
+## 2. 当前进度
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 需求确认 | ✅ 完成 | 已确认：Vue3+Vant 工程 / 通用全品类 Mock / 文字+链接输入 / 多页面全套 |
+| 前端工程 | ✅ 完成 | `frontend/`，Vue 3.4 + Vite 5 + Vant 4.9 + Vue Router 4（Hash 模式），`npm run build` 通过 |
+| 前端工程（网页版原型） | ✅ 完成 | `frontend-web/`，Vue 3.5 + Vite 5 + Tailwind 4 + Phosphor Icons（桌面优先网页版），`npm run build` 通过 |
+| 首页 HomeView | ✅ 完成（2026-09-13 修复） | 定位、核心原则、四步闭环、联盟 API 契约说明；**修复原则图标运行时崩溃**（`ShieldCheck`/`Eye`/`LinkSimple`/`Coins` 未加 `Ph` 前缀，页面曾整页空白） |
+| 对话页 ChatView | ✅ 完成 | Mock 对话链路：商品情报卡 → 对比摘要 → 推荐结论 → 领券按钮；图片输入（上传/预览/随消息发送，≤5MB）+ 复制口令按钮；**2026-09-13 第三轮：新增「为你定制」画像面板、query 画像解析（预算/平台/学生/会员）、三平台切换（双价卡/口令/附注全联动）、个性化推荐附注**；已浏览器实测 |
+| 款式对比 CompareView | ✅ 完成 | 双价矩阵 + 规格表（横滑）+ 券明细 + 结论；**2026-09-13 第三轮：新增三平台 tab（淘宝/京东/拼多多），价格矩阵随平台切换（含 PLUS 价/补贴标识）**；已浏览器实测 |
+| 领券指引 CouponGuideView | ✅ 完成 | 券类型、双价口径、分平台步骤、权益矩阵；「复制口令，跳转 App」卡片；**2026-09-13 第三轮：口令改按平台取（`prices[plat].code`），随平台 tab 联动**；已浏览器实测 |
+| Mock 数据 | ✅ 完成（2026-09-13 重构） | `src/mock/data.js`：**3 个真实品牌商品（索尼 WH-1000XM5 / 象印 SM-SA48/SM-SA60 / 芙丽芳丝净润洗面霜），官方可查规格，每个 SKU 含淘宝/京东/拼多多三平台 `prices{a,b,coupon,code,sales,plus?,subsidy?}`**；工具 `cheapest(product,plat)`/`bestPlat(product)`/`matchProduct`（已加品牌词） |
+| 用户画像模块 | ✅ 完成（2026-09-13 新增） | `src/utils/profile.js`：`parseQuery()` 从 query 提取预算/平台偏好/学生身份/价格敏感度/会员身份（PLUS/88VIP），`loadProfile/saveProfile` localStorage 持久化，`buildPersonalNote()` 生成个性化推荐附注 |
+| 口令复制工具 | ✅ 完成 | `src/utils/copy.js`：`navigator.clipboard` + `execCommand` 降级，http/file 场景可用 |
+| 后端（FastAPI + LangGraph 多 Agent） | ⬜ 未开始 | 见 §4 下一步 |
+| 联盟 API 真实接入 | ⬜ 未开始 | 淘宝联盟 / 京东联盟 / 多多进宝，Demo 阶段先 Mock |
+
+## 3. 技术坑与关键决策（踩坑记录）
+
+1. **Vant 4 没有表格组件**——对比表/双价矩阵全部手写 CSS grid 与 `<table>`（见 `CompareView.vue`），横滑容器需 `-webkit-overflow-scrolling: touch`。
+2. **路由用 Hash 模式**（`createWebHashHistory`）——静态托管（直接开 dist 或任意静态服务器）无需服务端 rewrite 配置。
+3. **Vant 全量引入**（`app.use(Vant)`）——Demo 简化处理，主 JS 包 ~325KB（gzip 119KB）；正式化时应换 `unplugin-vue-components` 按需引入。
+4. **浏览器自动化点击底部固定区域元素会超时**——IAB 中点击对话页底部输入区附近的快捷示例 chip 和「发送」按钮曾超时（疑似 fixed 定位/遮挡问题），改用输入框内 `press("Enter")`（ChatView 已支持 Enter 发送）可稳定触发。页面本身在真机浏览器无此问题。
+5. **对话打字动画（infinite CSS animation）曾导致截图超时**——无头截图遇持续动画可能挂起，等待动画结束或重开标签页即可。
+6. **文案红线**：全文只用「查询/采集/情报」，**禁用「爬取」字样**（设计稿 §3.1 命名约定，合规敏感）。
+7. **合规红线（已定决策，勿回退）**：不提供 CPS 推广链接、不代下单不代支付、渠道专享券必须同时给「能领/领不到」两个价、千人千面权益（天降红包/限时折扣）只指引不承诺、不用评论区数据。
+8. **双价口径统一**：价格 A = 公开价（红色 `--price-a`），价格 B = 领券价（绿色 `--price-b`），颜色变量在 `styles/main.css`，新页面勿另起配色。
+9. **npm install 有 audit 警告**（Vite 5 传递依赖）——Demo 不阻塞，升级 Vite 6/7 时需回归验证。
+10. **HomeView 曾整页空白（2026-09-13 发现并修复）**——`principles` 数组里图标变量写成了无 `Ph` 前缀的 `ShieldCheck/Eye/LinkSimple/Coins`，运行时 `ReferenceError` 崩溃，`npm run build` 不会报错（Rollup 不查未定义运行时变量）。教训：动态组件数组（`<pr.icon>`）的变量引用错误只能靠浏览器实测发现。
+11. **口令复制必须双通道**——`navigator.clipboard` 仅安全上下文可用，`src/utils/copy.js` 内置 `execCommand` 降级，否则 http/file 部署下复制按钮失效。
+12. **口令卡片平台联动**——有具体商品时口令卡绑定商品所属平台（`codePlat`），切换步骤 tab 不改变商品口令；无商品时展示平台演示口令并随 tab 切换。
+13. **浏览器自动化点击部分 button 未触发 Vue 事件（2026-09-13）**——bu.click 对部分按钮（如 CouponView tab）未生效，改用 JS `el.click()` 验证；真机无此问题，属自动化环境怪癖。
+14. **路由用 history 模式**（`frontend-web` 用 `createWebHistory`）——GitHub Pages 托管需配 `404.html` 兜底（SPA fallback），见部署 workflow。
+15. **三点改造（2026-09-13）**——① 演示商品换真实品牌（规格官方可查，价格区间模拟真实市场，图片仍 picsum 占位）；② 价格改三平台结构（A 公开价/B 领券价，京东 PLUS 价、拼多多补贴价、淘宝渠道券）；③ 产品定位转个人购物助手：`utils/profile.js` 画像系统，从用户 query 解析预算/平台偏好/学生身份/价格敏感度/会员身份并持久化，右栏画像卡 + 推荐附注（「你常用京东…」「在你的 3000 元预算内」）。
+16. **新数据结构（勿回退）**——`product.skus[].prices = { taobao, jd, pdd }`，每平台 `{ a, b, coupon{type,name,amount,threshold,note}, code, sales, plus?, subsidy? }`；旧字段 `priceA/priceB`、商品级 `platform/code/sales` 全部废弃；跨平台最低用 `bestPlat(product)`，平台内最低用 `cheapest(product, plat)`；历史消息的 `m.plat` 固化在消息对象里，切换当前平台不影响历史卡片。
+17. **预算解析正则坑（2026-09-13 实测发现）**——`(\d+)元?以内` 的「元」必须写可选 `(?:元|块钱|块)?`，否则「3000 以内」这类无单位表述不匹配，画像 budget 不会被记录；同理「不超过 2000」需靠前缀词分支。
+18. **自动化环境剪贴板受限（2026-09-13）**——`navigator.clipboard.writeText`/`readText` 要求文档聚焦，无头/非焦点浏览器下复制按钮无法复测（按钮不显「已复制」）；真机已验证双通道复制可用，本轮仅改口令取值来源（`prices[plat].code`），逻辑未动。
+
+## 4. 下一步（给接手的 Agent）
+
+1. 后端：FastAPI + LangGraph 实现 A1 路由 / A2 商品情报 / A3 价格情报 / A4 款式对比 / A5 推荐引导（设计稿 §3.1），Agent 间传 JSON Schema 契约数据；**建议新增 A0 User Profile Agent 管理用户画像（前端 `utils/profile.js` 已定义字段与解析规则，后端化后前端只读结果）**。
+2. 前端接后端：仅需替换 `ChatView.vue` 中的 `matchProduct` 模拟回复为流式/分步接口，页面结构不动。
+3. 数据库：PostgreSQL + pgvector（RAG：活动规则/券知识/规格库）+ Redis（券缓存/会话/画像）。
+4. 确定网页版前端技术栈：`frontend-web/`（Vue3 + Tailwind 4）是否转正，与 `frontend/`（Vant）二选一并冻结（设计稿 v0.4）。**2026-09-13 倾向：frontend-web 转正（用户对 Vant 版不满意，已按网页版补齐图片输入、口令复制、三平台价格与个人画像）**。
+5. 设计稿待决事项（⏳）仍开放：首批数据源、目标用户、变现路径、联盟账号（Demo 品类已定全品类、对话方式已定文字+链接+图片）。
+6. 发布：`frontend-web/` 已含 GitHub Actions Pages workflow（`.github/workflows/deploy.yml`），推送 main 后到仓库 Settings → Pages → Deploy from a branch / GitHub Actions 启用即可。
+
+## 5. 启动命令
+
+```bash
+cd frontend
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # 产物 dist/，任意静态服务器可托管
+
+cd ../frontend-web
+npm install
+npm run dev      # http://localhost:5175
+npm run build    # 产物 dist/，任意静态服务器可托管
+```
+
+## 第四轮：部署上线完成（2026-09-13）
+
+- 仓库：`szy0607/price-agent`（原名 price-agent-web，用户改名）。仓库结构 = 完整项目：`frontend-web/`（网页版，Pages 部署目标）+ `frontend/`（Vant 版）+ `智能电商采购Agent-设计方案.md` + 根 README/.gitignore。
+- 线上站点：https://szy0607.github.io/price-agent/ 已上线，浏览器实测主页与 /chat 子路由渲染正常。
+- 三个部署问题已修复：
+  1. EINTEGRITY（@vue/compiler-sfc tarball 校验失败）＝ setup-node 的 cache:npm 缓存坏 tarball 稳定复现 → deploy.yml 去掉 npm 缓存 + npm ci 前 npm cache clean --force。
+  2. Pages 未启用 → 用户 Settings→Pages→Source=GitHub Actions。
+  3. 线上白屏＝Vite 未配 base，子路径资源 404 → vite.config.js 加 base:'/price-agent/'，router 用 createWebHistory(import.meta.env.BASE_URL)。
+- 环境坑：直连 github.com 443 超时，git 需走系统代理 http://127.0.0.1:7890；github API 匿名限流；bu 浏览器访问 github.io 有缓存需 ?v= 绕过。
+- 本地 F:\price-agent 仍非 git 仓库（用户此前用网页上传）；如需本地 git 管理：cd F:\price-agent; git init; git remote add origin https://github.com/szy0607/price-agent.git; git fetch; git checkout -B main origin/main。
+- 待决：A0 User Profile Agent 后端化（前端 utils/profile.js 字段已定义）；frontend-web 转正冻结（已完成倾向）；Demo Mock 数据源 → 联盟 API 实接。
