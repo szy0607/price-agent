@@ -242,7 +242,8 @@ flowchart LR
 | 后端框架 | FastAPI（暂定） | **随产品开发调整，不锁死** |
 | Agent 编排 | LangGraph | 状态图驱动 |
 | LLM 接口 | OpenAI / Anthropic function calling | 工具调用为标准能力 |
-| 业务数据库 | PostgreSQL + pgvector | 对话/画像/推荐 + RAG 向量 |
+| 业务数据库 | MySQL | 对话/画像/推荐等结构化业务数据 |
+| 向量数据库 | Milvus | RAG 向量检索（活动规则/券知识/规格库）；替代原 PG + pgvector |
 | 缓存 | Redis | 券信息缓存、会话状态 |
 | 沙箱 | 进程级（起步）→ Docker（可选） | 信息采集隔离 |
 | 审计 | 结构化日志 + trace_id | 全链路可回放 |
@@ -265,6 +266,7 @@ flowchart LR
 | 8 | 优惠信息获取边界 | 商品属性型优惠走联盟 API；账号/流量型权益走 RAG 规则指引；**不引入评论区爬虫** |
 | 9 | Demo 范围 | 全品类（通用全品类 Mock） |
 | 10 | 对话方式 | 文字 + 链接 + 图片输入（图片输入属模型多模态能力，由所选 LLM 决定） |
+| 11 | 数据库选型 | 业务库 MySQL + 向量库 Milvus（替代原 PG + pgvector） |
 
 ### 待决事项（⏳）
 

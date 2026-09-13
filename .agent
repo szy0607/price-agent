@@ -47,6 +47,7 @@
 16. **新数据结构（勿回退）**——`product.skus[].prices = { taobao, jd, pdd }`，每平台 `{ a, b, coupon{type,name,amount,threshold,note}, code, sales, plus?, subsidy? }`；旧字段 `priceA/priceB`、商品级 `platform/code/sales` 全部废弃；跨平台最低用 `bestPlat(product)`，平台内最低用 `cheapest(product, plat)`；历史消息的 `m.plat` 固化在消息对象里，切换当前平台不影响历史卡片。
 17. **预算解析正则坑（2026-09-13 实测发现）**——`(\d+)元?以内` 的「元」必须写可选 `(?:元|块钱|块)?`，否则「3000 以内」这类无单位表述不匹配，画像 budget 不会被记录；同理「不超过 2000」需靠前缀词分支。
 18. **自动化环境剪贴板受限（2026-09-13）**——`navigator.clipboard.writeText`/`readText` 要求文档聚焦，无头/非焦点浏览器下复制按钮无法复测（按钮不显「已复制」）；真机已验证双通道复制可用，本轮仅改口令取值来源（`prices[plat].code`），逻辑未动。
+19. **数据库选型定案（2026-09-13，后端开工轮）**——业务库 = **MySQL 8**（SQLAlchemy 2.x 同步 + PyMySQL），向量库 = **Milvus**（替代设计稿 §5 原定的 PostgreSQL + pgvector）。登录态用 **Session Cookie**（会话落 MySQL `user_sessions` 表，Cookie 放原始 token、库内只存 sha256）。**用户注册/登录只碰 MySQL，Milvus 到 M3 再接**。契约文档：`docs/用户注册与登录-接口契约.md`。
 
 ## 4. 下一步（给接手的 Agent）
 
