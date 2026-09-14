@@ -5,6 +5,7 @@ const routes = [
   { path: '/chat', name: 'chat', component: () => import('../views/ChatView.vue'), meta: { title: '咨询' } },
   { path: '/compare', name: 'compare', component: () => import('../views/CompareView.vue'), meta: { title: '款式对比' } },
   { path: '/coupon', name: 'coupon', component: () => import('../views/CouponGuideView.vue'), meta: { title: '领券指引' } },
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { title: '页面不存在' } },
 ]
 
 const router = createRouter({

@@ -48,3 +48,37 @@ body {
     transition: none;
   }
 }
+
+/* 键盘可达性：统一焦点环（鼠标点击不触发，仅 Tab 导航出现） */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 标题避免孤字换行 */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* 聊天消息进场：轻量上移淡入，不打断阅读 */
+.msg-in {
+  animation: msg-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-in {
+    animation: none;
+  }
+}

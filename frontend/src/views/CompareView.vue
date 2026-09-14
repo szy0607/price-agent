@@ -1,12 +1,24 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { products, PLATFORMS } from '../mock/data'
 
 const route = useRoute()
 const activeIdx = ref(0)
+
+// 从商品卡深链跳转（/compare?id=xxx）时定位到对应商品
+onMounted(() => {
+  const idx = products.findIndex((p) => p.id === route.query.id)
+  if (idx > -1) activeIdx.value = idx
+})
+
 const product = computed(() => products[activeIdx.value])
 const platform = computed(() => PLATFORMS[product.value.platform])
+
+// 领券价 B 最低的款式
+const cheapestSku = computed(() =>
+  product.value.skus.reduce((acc, s) => (s.priceB < acc.priceB ? s : acc), product.value.skus[0])
+)
 
 // 规格行 = 所有 SKU 规格键的并集
 const specKeys = computed(() => {
@@ -33,7 +45,7 @@ const specKeys = computed(() => {
     </van-tabs>
 
     <!-- 商品头 -->
-    <section class="card prod-head">
+    <section class="card prod-head rise">
       <div class="prod-emoji">{{ product.emoji }}</div>
       <div>
         <div class="prod-title">{{ product.title }}</div>
@@ -48,7 +60,7 @@ const specKeys = computed(() => {
     </section>
 
     <!-- 双价矩阵 -->
-    <section class="card">
+    <section class="card rise d1">
       <div class="card-title">💰 双价测算矩阵</div>
       <div class="price-grid">
         <div class="price-grid-head">
@@ -56,10 +68,16 @@ const specKeys = computed(() => {
           <span>公开价 A</span>
           <span>领券价 B</span>
         </div>
-        <div v-for="s in product.skus" :key="s.name" class="price-grid-row">
+        <div
+          v-for="s in product.skus"
+          :key="s.name"
+          class="price-grid-row"
+          :class="{ best: s === cheapestSku }"
+        >
           <span class="row-name">
             {{ s.name }}
             <em v-if="s.subsidy" class="subsidy">百亿补贴</em>
+            <em v-if="s === cheapestSku" class="best-tag">到手最低</em>
           </span>
           <span class="price-a">¥{{ s.priceA }}</span>
           <span class="price-b">¥{{ s.priceB }}</span>
@@ -71,7 +89,7 @@ const specKeys = computed(() => {
     </section>
 
     <!-- 规格对比表 -->
-    <section class="card">
+    <section class="card rise d2">
       <div class="card-title">🔍 规格参数对比</div>
       <div class="spec-table-wrap">
         <table class="spec-table">
@@ -96,7 +114,7 @@ const specKeys = computed(() => {
     </section>
 
     <!-- 券信息明细 -->
-    <section class="card">
+    <section class="card rise d3">
       <div class="card-title">🎟️ 券信息明细</div>
       <div v-for="s in product.skus" :key="s.name" class="coupon-line">
         <div class="coupon-line-head">
@@ -113,7 +131,7 @@ const specKeys = computed(() => {
     </section>
 
     <!-- 结论 -->
-    <section class="card conclusion">
+    <section class="card conclusion rise d4">
       <div class="card-title">✅ 对比结论（A5 推荐引导 Agent）</div>
       <p>{{ product.conclusion }}</p>
     </section>
@@ -163,7 +181,7 @@ const specKeys = computed(() => {
 }
 .price-grid {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .price-grid-head,
@@ -183,19 +201,32 @@ const specKeys = computed(() => {
 .price-grid-row:last-child {
   border-bottom: none;
 }
+.price-grid-row.best {
+  background: #f1faf5;
+}
 .row-name {
   text-align: left;
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 .row-name em.subsidy {
-  display: inline-block;
   font-style: normal;
   font-size: 9px;
-  color: #e02e24;
-  border: 1px solid #e02e24;
+  color: #d2372c;
+  border: 1px solid rgba(210, 55, 44, 0.45);
   border-radius: 4px;
   padding: 0 3px;
-  margin-left: 4px;
+}
+.row-name em.best-tag {
+  font-style: normal;
+  font-size: 9px;
+  color: #fff;
+  background: var(--price-b);
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 .legend {
   font-size: 11px;
@@ -257,4 +288,29 @@ const specKeys = computed(() => {
   line-height: 1.8;
   margin: 0;
 }
+
+/* ---------- 桌面端：内容限宽居中，表格放大 ---------- */
+
+@media (min-width: 768px) {
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .price-grid-head,
+  .price-grid-row {
+    font-size: 14px;
+    padding: 11px 14px;
+  }
+  .row-name {
+    font-size: 13px;
+  }
+  .spec-table {
+    font-size: 13px;
+  }
+  .spec-table th,
+  .spec-table td {
+    padding: 9px 12px;
+  }
+}
+
 </style>

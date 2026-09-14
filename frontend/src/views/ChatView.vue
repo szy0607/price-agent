@@ -88,6 +88,11 @@ onMounted(() => {
     <!-- 消息区 -->
     <div ref="listRef" class="chat-list">
       <div v-for="m in messages" :key="m.id" class="msg" :class="m.role">
+        <!-- Agent 头像（圆角方形） -->
+        <div v-if="m.role === 'agent'" class="agent-avatar">
+          <van-icon name="cart-o" size="15" color="var(--brand-deep)" />
+        </div>
+
         <!-- 用户消息 -->
         <div v-if="m.role === 'user'" class="bubble user-bubble">{{ m.text }}</div>
 
@@ -131,7 +136,12 @@ onMounted(() => {
             <div class="mini-row mini-head">
               <span>款式</span><span>公开价 A</span><span>领券价 B</span>
             </div>
-            <div v-for="s in m.product.skus" :key="s.name" class="mini-row">
+            <div
+              v-for="s in m.product.skus"
+              :key="s.name"
+              class="mini-row"
+              :class="{ 'mini-best': s.priceB === cheapest(m.product).priceB }"
+            >
               <span class="mini-name">{{ s.name }}</span>
               <span class="price-a">¥{{ s.priceA }}</span>
               <span class="price-b">¥{{ s.priceB }}</span>
@@ -156,6 +166,9 @@ onMounted(() => {
 
       <!-- 打字中 -->
       <div v-if="typing" class="msg agent">
+        <div class="agent-avatar">
+          <van-icon name="cart-o" size="15" color="var(--brand-deep)" />
+        </div>
         <div class="bubble agent-bubble typing">
           <span></span><span></span><span></span>
         </div>
@@ -191,6 +204,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 50px);
+  height: calc(100dvh - 50px);
 }
 .chat-list {
   flex: 1;
@@ -199,33 +213,59 @@ onMounted(() => {
 }
 .msg {
   display: flex;
-  margin-bottom: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  animation: msg-in 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 .msg.user {
   justify-content: flex-end;
 }
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.agent-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  margin-right: 8px;
+  background: var(--brand-light);
+  border: 1px solid rgba(62, 102, 224, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .bubble {
   max-width: 86%;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 10px 13px;
+  border-radius: 16px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 .user-bubble {
-  background: var(--brand);
+  background: linear-gradient(160deg, #4a74e6, #3358c9);
   color: #fff;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 6px 16px -8px rgba(42, 76, 184, 0.5);
 }
 .agent-bubble {
   background: #fff;
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 4px;
+  border: 1px solid rgba(231, 235, 244, 0.9);
+  border-bottom-left-radius: 5px;
+  box-shadow: 0 4px 14px -8px rgba(23, 32, 56, 0.12);
 }
 .pre {
   white-space: pre-wrap;
 }
 .card-bubble {
-  width: 92%;
+  width: 88%;
 }
 .card-lead {
   margin: 0 0 8px;
@@ -237,9 +277,13 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px;
   cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.prod-card:active {
+  transform: scale(0.985);
 }
 .prod-emoji {
   font-size: 30px;
@@ -249,7 +293,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   background: #fff;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
 }
 .prod-info {
@@ -291,7 +335,7 @@ onMounted(() => {
 }
 .mini-table {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   font-size: 12px;
 }
@@ -304,6 +348,9 @@ onMounted(() => {
 }
 .mini-row:last-child {
   border-bottom: none;
+}
+.mini-row.mini-best {
+  background: #f1faf5;
 }
 .mini-head {
   background: var(--bg);
@@ -331,8 +378,9 @@ onMounted(() => {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  background: #f0fbf6;
-  border-radius: 8px;
+  background: #effaf4;
+  border: 1px solid #d7f0e5;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
   margin-bottom: 10px;
@@ -369,15 +417,25 @@ onMounted(() => {
   gap: 6px;
   overflow-x: auto;
   padding-bottom: 6px;
+  scrollbar-width: none;
+}
+.samples-row::-webkit-scrollbar {
+  display: none;
 }
 .sample-chip {
   flex-shrink: 0;
   font-size: 11px;
   color: var(--brand-deep);
   background: var(--brand-light);
+  border: 1px solid rgba(62, 102, 224, 0.12);
   border-radius: 999px;
   padding: 4px 10px;
   cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.sample-chip:active {
+  transform: scale(0.95);
+  background: #e0eafd;
 }
 .input-row {
   display: flex;
@@ -388,6 +446,11 @@ onMounted(() => {
   background: var(--bg);
   border-radius: 20px;
   padding: 7px 12px;
+  /* 16px 避免 iOS 聚焦自动放大 */
+  font-size: 16px;
+}
+.input-row .van-field ::placeholder {
+  font-size: 14px;
 }
 .input-foot {
   font-size: 10px;
@@ -398,4 +461,37 @@ onMounted(() => {
 .safe-bottom {
   padding-bottom: calc(6px + env(safe-area-inset-bottom));
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .msg {
+    animation: none;
+  }
+}
+
+/* ---------- 桌面端：居中加宽，顶部导航占 56px ---------- */
+
+@media (min-width: 768px) {
+  .chat-page {
+    height: calc(100dvh - 56px);
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .chat-list {
+    padding: 20px 16px;
+  }
+  .bubble {
+    font-size: 14px;
+  }
+  .card-bubble {
+    width: 92%;
+  }
+  .sample-chip {
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .sample-chip:hover {
+    background: #e0eafd;
+  }
+}
+
 </style>

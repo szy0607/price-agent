@@ -19,7 +19,7 @@ function setPlat(k) {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+  <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900">
     <!-- 商品头 -->
     <div class="flex items-center gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
       <img :src="product.image" :alt="product.name" class="h-16 w-16 rounded-xl object-cover" loading="lazy" />

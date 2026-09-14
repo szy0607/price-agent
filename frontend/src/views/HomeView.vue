@@ -12,10 +12,10 @@ const principles = [
 ]
 
 const flow = [
-  { step: '①', title: '咨询', desc: '发商品链接或提问' },
-  { step: '②', title: '款式对比', desc: '采集各款式信息与差异' },
-  { step: '③', title: '双价测算', desc: '公开价 / 领券价一目了然' },
-  { step: '④', title: '领券指引', desc: '自己领券，最低价拿下' },
+  { title: '咨询', desc: '发商品链接或提问' },
+  { title: '款式对比', desc: '采集各款式信息与差异' },
+  { title: '双价测算', desc: '公开价 / 领券价一目了然' },
+  { title: '领券指引', desc: '自己领券，最低价拿下' },
 ]
 
 const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算？', '氨基酸洗面奶单支还是两支装？']
@@ -24,23 +24,27 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
 <template>
   <div class="page home">
     <!-- Hero -->
-    <section class="hero card">
-      <div class="hero-badge">网页版 Demo</div>
-      <h1 class="hero-title">智能导购 Agent</h1>
-      <p class="hero-desc">
-        多款式不知道怎么选？Agent 帮你对比款式、测算活动价格，
-        告诉你<b>怎么领券拿到最低价</b>——下单这一步，交给你自己。
-      </p>
-      <van-button type="primary" round block size="large" @click="router.push('/chat')">
-        开始咨询
-      </van-button>
+    <section class="hero rise">
+      <div class="hero-inner">
+        <div class="hero-badge">网页版 Demo</div>
+        <h1 class="hero-title">智能导购 Agent</h1>
+        <p class="hero-desc">
+          多款式不知道怎么选？Agent 帮你对比款式、测算活动价格，
+          告诉你<b>怎么领券拿到最低价</b>——下单这一步，交给你自己。
+        </p>
+        <van-button class="hero-cta" size="large" round @click="router.push('/chat')">
+          开始咨询
+        </van-button>
+      </div>
     </section>
 
     <!-- 核心原则 -->
     <div class="section-label">核心原则</div>
     <section class="principles">
       <div v-for="p in principles" :key="p.title" class="card principle">
-        <van-icon :name="p.icon" size="20" color="var(--brand)" />
+        <div class="principle-icon">
+          <van-icon :name="p.icon" size="18" color="var(--brand)" />
+        </div>
         <div>
           <div class="principle-title">{{ p.title }}</div>
           <div class="principle-desc">{{ p.desc }}</div>
@@ -50,10 +54,10 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
 
     <!-- 四步闭环 -->
     <div class="section-label">咨询四步闭环</div>
-    <section class="card">
+    <section class="card rise d2">
       <div class="flow">
-        <div v-for="(f, i) in flow" :key="f.step" class="flow-item">
-          <div class="flow-step">{{ f.step }}</div>
+        <div v-for="(f, i) in flow" :key="f.title" class="flow-item">
+          <div class="flow-dot">{{ i + 1 }}</div>
           <div class="flow-title">{{ f.title }}</div>
           <div class="flow-desc">{{ f.desc }}</div>
         </div>
@@ -76,7 +80,7 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
 
     <!-- 数据接口说明 -->
     <div class="section-label">数据说明</div>
-    <section class="card">
+    <section class="card rise d5">
       <div class="card-title">📊 联盟查券 API · 统一适配层</div>
       <div v-for="a in apiContract" :key="a.fn" class="api-row">
         <code>{{ a.fn }}</code>
@@ -92,30 +96,81 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
 </template>
 
 <style scoped>
+/* Hero：深海军蓝底 + 品牌蓝径向光晕 + 噪点，替代紫蓝 AI 渐变 */
 .hero {
-  background: linear-gradient(135deg, #3b7cff 0%, #6f5bff 100%);
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  padding: 24px 16px 20px;
+  margin-bottom: 12px;
   color: #fff;
-  border: none;
-  padding: 22px 16px;
+  background: linear-gradient(165deg, #101d44 0%, #16295e 55%, #1b3170 100%);
+  box-shadow: 0 16px 36px -18px rgba(16, 29, 68, 0.55);
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(110% 80% at 88% -12%, rgba(88, 133, 255, 0.5), transparent 62%),
+    radial-gradient(80% 60% at -8% 112%, rgba(62, 102, 224, 0.35), transparent 58%);
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  pointer-events: none;
+}
+.hero-inner {
+  position: relative;
+  z-index: 1;
 }
 .hero-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
-  padding: 2px 10px;
+  letter-spacing: 1px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
-  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  margin-bottom: 12px;
 }
 .hero-title {
   margin: 0 0 8px;
-  font-size: 24px;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+  text-wrap: balance;
 }
 .hero-desc {
   font-size: 13px;
-  line-height: 1.7;
-  margin: 0 0 16px;
-  opacity: 0.92;
+  line-height: 1.75;
+  margin: 0 0 18px;
+  color: rgba(233, 239, 255, 0.88);
 }
+.hero-desc b {
+  color: #fff;
+}
+.hero-cta {
+  background: #fff;
+  color: var(--ink);
+  border: 0;
+  font-weight: 600;
+  box-shadow: 0 10px 24px -10px rgba(6, 13, 35, 0.6);
+}
+.hero-cta:active {
+  transform: scale(0.98);
+}
+
+/* 核心原则：图标芯片 + 逐个入场 */
 .principles {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -124,6 +179,21 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
 .principle {
   margin: 0;
   padding: 12px;
+  animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.principle:nth-child(1) { animation-delay: 0.08s; }
+.principle:nth-child(2) { animation-delay: 0.14s; }
+.principle:nth-child(3) { animation-delay: 0.2s; }
+.principle:nth-child(4) { animation-delay: 0.26s; }
+.principle-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
 }
 .principle-title {
   font-size: 13px;
@@ -135,14 +205,46 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
   color: var(--ink-2);
   line-height: 1.5;
 }
+
+/* 四步闭环：圆点 + 虚线连接线，终点强调 */
 .flow {
+  position: relative;
   display: flex;
   justify-content: space-between;
+  padding-top: 4px;
+}
+.flow::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 14%;
+  right: 14%;
+  border-top: 2px dashed var(--line);
+}
+.flow-item {
+  position: relative;
+  z-index: 1;
   text-align: center;
 }
-.flow-step {
-  font-size: 18px;
-  margin-bottom: 4px;
+.flow-dot {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--brand-light);
+  color: var(--brand-deep);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.flow-item:last-child .flow-dot {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  box-shadow: 0 4px 12px -4px rgba(62, 102, 224, 0.6);
 }
 .flow-title {
   font-size: 13px;
@@ -156,6 +258,14 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
   margin: 0 auto;
   line-height: 1.4;
 }
+
+/* 示例问题：按压反馈 + 逐个入场 */
+.samples .sample {
+  animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.samples .sample:nth-child(1) { animation-delay: 0.3s; }
+.samples .sample:nth-child(2) { animation-delay: 0.36s; }
+.samples .sample:nth-child(3) { animation-delay: 0.42s; }
 .sample {
   display: flex;
   justify-content: space-between;
@@ -163,7 +273,19 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
   padding: 13px 14px;
   cursor: pointer;
   font-size: 13px;
+  transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1), background-color 0.18s ease;
 }
+.sample:active {
+  transform: scale(0.98);
+  background: #f7f9fd;
+}
+.sample .van-icon {
+  transition: transform 0.18s ease;
+}
+.sample:active .van-icon {
+  transform: translateX(2px);
+}
+
 .api-row {
   display: flex;
   justify-content: space-between;
@@ -188,4 +310,76 @@ const samples = ['三款降噪耳机怎么选？', '750ml 保温杯哪款划算�
   margin: 10px 0 0;
   line-height: 1.6;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .principle,
+  .samples .sample {
+    animation: none;
+  }
+}
+
+/* ---------- 桌面端 ---------- */
+
+.sample:hover {
+  border-color: rgba(62, 102, 224, 0.35);
+}
+.sample:hover .van-icon {
+  transform: translateX(2px);
+  color: var(--brand);
+}
+
+@media (min-width: 768px) {
+  .hero {
+    padding: 44px 40px 40px;
+  }
+  .hero-title {
+    font-size: 36px;
+  }
+  .hero-desc {
+    font-size: 15px;
+    max-width: 560px;
+    margin-bottom: 22px;
+  }
+  .hero-cta {
+    max-width: 280px;
+  }
+  .principles {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .principle {
+    padding: 16px;
+  }
+  .principle-desc {
+    font-size: 12px;
+  }
+  .flow {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .flow-desc {
+    max-width: 130px;
+    font-size: 12px;
+  }
+  .samples {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .samples .sample {
+    margin-bottom: 0;
+    padding: 15px 18px;
+    font-size: 14px;
+  }
+  .api-row {
+    font-size: 13px;
+  }
+  .api-row code {
+    font-size: 12px;
+  }
+  .api-note {
+    font-size: 12px;
+  }
+}
+
 </style>

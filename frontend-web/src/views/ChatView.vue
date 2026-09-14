@@ -162,9 +162,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto grid h-[calc(100dvh-4rem)] max-w-7xl grid-cols-[240px_1fr] lg:grid-cols-[240px_1fr_360px]">
+  <div class="mx-auto grid h-[calc(100dvh-4rem)] max-w-7xl grid-cols-[240px_1fr] overflow-hidden lg:grid-cols-[240px_1fr_360px]">
     <!-- 左栏：咨询会话 -->
-    <aside class="hidden flex-col border-r border-zinc-200/70 md:flex dark:border-zinc-800">
+    <aside class="hidden min-h-0 flex-col border-r border-zinc-200/70 md:flex dark:border-zinc-800">
       <div class="px-5 pb-2 pt-5 text-xs font-medium text-zinc-500 dark:text-zinc-400">历史咨询</div>
       <div class="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
         <button
@@ -193,9 +193,9 @@ onMounted(() => {
     </aside>
 
     <!-- 中栏：对话 -->
-    <section class="flex min-w-0 flex-col">
+    <section class="flex min-h-0 min-w-0 flex-col">
       <div ref="listRef" class="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-        <div v-for="m in state.messages" :key="m.id" class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+        <div v-for="m in state.messages" :key="m.id" class="msg-in flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
           <!-- 用户 -->
           <div v-if="m.role === 'user'" class="max-w-[75%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-white">
             <img v-if="m.image" :src="m.image" :alt="m.text || '用户上传的商品图片'" class="mb-2 max-h-48 rounded-lg object-cover" />
@@ -302,7 +302,7 @@ onMounted(() => {
         </div>
 
         <!-- 打字中 -->
-        <div v-if="typing" class="flex justify-start">
+        <div v-if="typing" class="msg-in flex justify-start">
           <div class="flex gap-3">
             <span class="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
               <PhSparkle :size="14" weight="bold" />
@@ -372,7 +372,7 @@ onMounted(() => {
     </section>
 
     <!-- 右栏：为你定制 + 商品情报面板 -->
-    <aside class="hidden flex-col gap-4 overflow-y-auto border-l border-zinc-200/70 p-5 lg:flex dark:border-zinc-800">
+    <aside class="hidden min-h-0 flex-col gap-4 overflow-y-auto border-l border-zinc-200/70 p-5 lg:flex dark:border-zinc-800">
       <!-- 用户画像卡 -->
       <div class="rounded-2xl border border-accent/25 bg-accent-soft p-4 dark:border-accent/30 dark:bg-accent/10">
         <div class="flex items-center justify-between">

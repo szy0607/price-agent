@@ -28,7 +28,7 @@ const platTabs = [
     </p>
 
     <!-- 券类型说明 -->
-    <section class="card">
+    <section class="card rise">
       <div class="card-title">🎟️ 两种券，两种口径</div>
       <div v-for="t in couponTypes" :key="t.key" class="ctype" :style="{ borderLeftColor: t.color }">
         <div class="ctype-name">{{ t.name }}</div>
@@ -42,7 +42,7 @@ const platTabs = [
     </section>
 
     <!-- 平台领券步骤 -->
-    <section class="card">
+    <section class="card rise d1">
       <div class="card-title">🧭 领券步骤 · {{ platName }}</div>
       <van-tabs v-model:active="activePlat" shrink>
         <van-tab v-for="t in platTabs" :key="t.key" :title="t.label" :name="t.key" />
@@ -56,7 +56,7 @@ const platTabs = [
     </section>
 
     <!-- 优惠类型获取策略 -->
-    <section class="card">
+    <section class="card rise d2">
       <div class="card-title">📡 {{ platName }}优惠类型怎么获取</div>
       <div v-for="b in benefits" :key="b.name" class="benefit-row">
         <div class="benefit-name">
@@ -72,7 +72,7 @@ const platTabs = [
     </section>
 
     <!-- 不做什么 -->
-    <section class="card no-list">
+    <section class="card no-list rise d3">
       <div class="card-title">🚫 我们不做什么</div>
       <div class="no-item">不代下单、不代支付——交易 100% 由你完成</div>
       <div class="no-item">不提供 CPS 推广链接——只给领券路径</div>
@@ -166,4 +166,19 @@ const platTabs = [
   content: '✕ ';
   font-weight: 700;
 }
+
+/* ---------- 桌面端：内容限宽居中 ---------- */
+
+@media (min-width: 768px) {
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .ctype-desc,
+  .step-desc,
+  .benefit-how {
+    font-size: 13px;
+  }
+}
+
 </style>

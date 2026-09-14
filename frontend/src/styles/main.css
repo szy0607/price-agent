@@ -1,41 +1,76 @@
 /* 全局样式：移动优先 */
 :root {
-  --brand: #3b7cff;
-  --brand-light: #ecf2ff;
-  --brand-deep: #1f4fd8;
+  /* 品牌色：单一强调色（蓝），饱和度克制 */
+  --brand: #3e66e0;
+  --brand-light: #ecf1fe;
+  --brand-deep: #2a4cb8;
+
+  /* 中性色：统一偏蓝的灰阶 */
   --ink: #1c2333;
   --ink-2: #5b6478;
   --ink-3: #98a0b3;
-  --bg: #f5f7fb;
+  --bg: #f4f6fb;
   --card: #ffffff;
-  --line: #e8ecf4;
-  --price-a: #ff6034;
-  --price-b: #0abf7e;
+  --line: #e7ebf4;
+
+  /* 双价语义色（A 公开价 / B 领券价） */
+  --price-a: #e2552e;
+  --price-b: #0a9e6e;
+
+  /* 表面 */
+  --shadow-card: 0 1px 2px rgba(23, 32, 56, 0.04), 0 10px 28px -14px rgba(23, 32, 56, 0.16);
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+
+  /* Vant 主色对齐品牌色，避免页面出现两套蓝 */
+  --van-primary-color: #3e66e0;
+  --van-success-color: #0a9e6e;
 }
 
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
-    'Microsoft YaHei', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'HarmonyOS Sans SC',
+    'Noto Sans SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(120% 340px at 50% -140px, rgba(62, 102, 224, 0.09), transparent 72%),
+    var(--bg);
+  background-repeat: no-repeat;
 }
 
+::selection {
+  background: rgba(62, 102, 224, 0.16);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---------- 页面骨架 ---------- */
+
 .page {
-  padding: 12px 12px 24px;
+  padding: 12px 12px 28px;
 }
 
 .page-title {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 700;
+  letter-spacing: -0.3px;
   margin: 8px 0 4px;
+  text-wrap: balance;
 }
 
 .page-subtitle {
@@ -45,12 +80,15 @@ body {
   line-height: 1.6;
 }
 
+/* ---------- 卡片 ---------- */
+
 .card {
   background: var(--card);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 14px;
   margin-bottom: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(231, 235, 244, 0.8);
+  box-shadow: var(--shadow-card);
 }
 
 .card-title {
@@ -63,10 +101,21 @@ body {
 }
 
 .section-label {
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--ink-3);
-  margin: 16px 4px 8px;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
+  margin: 18px 4px 8px;
+}
+.section-label::before {
+  content: '';
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--brand), rgba(62, 102, 224, 0.25));
 }
 
 .disclaimer {
@@ -77,7 +126,17 @@ body {
   padding: 8px 12px 4px;
 }
 
-/* 双价标签 */
+/* ---------- 双价标签：数字等宽对齐 ---------- */
+
+.price-a,
+.price-b,
+.price-grid,
+.mini-table,
+.spec-table,
+.api-row code {
+  font-variant-numeric: tabular-nums;
+}
+
 .price-a {
   color: var(--price-a);
   font-weight: 700;
@@ -95,3 +154,78 @@ body {
   background: var(--brand-light);
   color: var(--brand-deep);
 }
+
+/* ---------- 交互反馈 ---------- */
+
+.pressable {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+.pressable:active {
+  transform: scale(0.98);
+}
+
+/* ---------- 入场动画 ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.1s; }
+.d3 { animation-delay: 0.16s; }
+.d4 { animation-delay: 0.22s; }
+.d5 { animation-delay: 0.28s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .pressable,
+  .pressable:active {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ---------- 桌面端（电脑端网页版）排版放大 ---------- */
+
+@media (min-width: 768px) {
+  .page {
+    padding: 20px 24px 40px;
+  }
+  .page-title {
+    font-size: 26px;
+  }
+  .page-subtitle {
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+  .card {
+    border-radius: 16px;
+    padding: 18px;
+  }
+  .card-title {
+    font-size: 16px;
+  }
+  .section-label {
+    margin: 26px 4px 10px;
+    font-size: 12px;
+  }
+  .disclaimer {
+    font-size: 12px;
+  }
+}
+

@@ -12,6 +12,13 @@ const links = [
 
 <template>
   <div class="flex min-h-dvh flex-col">
+    <!-- 键盘用户跳过导航 -->
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-[10px] focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+    >
+      跳到主要内容
+    </a>
     <!-- 顶部导航：单行，高 64px -->
     <header class="sticky top-0 z-40 border-b border-zinc-200/70 bg-zinc-50/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
       <nav class="mx-auto flex h-16 max-w-6xl items-center gap-8 px-6">
@@ -46,21 +53,28 @@ const links = [
       </nav>
     </header>
 
-    <main class="flex-1">
+    <main id="main" class="flex-1">
       <RouterView />
     </main>
 
     <footer class="border-t border-zinc-200/70 dark:border-zinc-800">
-      <div class="mx-auto flex max-w-6xl flex-col gap-2 px-6 py-8 text-[13px] text-zinc-500 dark:text-zinc-400">
-        <div class="flex items-center gap-2.5">
-          <span class="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-white">
-            <PhChatCircleDots :size="13" weight="bold" />
-          </span>
-          <span class="font-medium text-zinc-700 dark:text-zinc-300">智能导购 Agent</span>
+      <div class="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8 md:flex-row md:items-start md:justify-between">
+        <div class="text-[13px] text-zinc-500 dark:text-zinc-400">
+          <div class="flex items-center gap-2.5">
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-white">
+              <PhChatCircleDots :size="13" weight="bold" />
+            </span>
+            <span class="font-medium text-zinc-700 dark:text-zinc-300">智能导购 Agent</span>
+          </div>
+          <p class="mt-2 max-w-[62ch] leading-relaxed">
+            本工具仅提供信息聚合与决策建议：不代下单、不代支付、不提供推广链接。价格与券信息以平台页面实时展示为准。
+          </p>
         </div>
-        <p class="max-w-[65ch] leading-relaxed">
-          本工具仅提供信息聚合与决策建议：不代下单、不代支付、不提供推广链接。价格与券信息以平台页面实时展示为准。
-        </p>
+        <nav class="flex items-center gap-5 text-[13px]" aria-label="页脚导航">
+          <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+            {{ l.label }}
+          </RouterLink>
+        </nav>
       </div>
     </footer>
   </div>

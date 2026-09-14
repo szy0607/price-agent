@@ -28,8 +28,13 @@ const principles = [
 
 <template>
   <div>
-    <!-- Hero：不对称分栏 -->
-    <section class="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-20 pt-16 lg:grid-cols-12 lg:pt-24">
+    <!-- Hero：不对称分栏 + 顶部氛围光（单色低调，避免渐变横幅感） -->
+    <section class="relative mx-auto grid max-w-6xl items-center gap-12 overflow-visible px-6 pb-20 pt-16 lg:grid-cols-12 lg:pt-24">
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute -inset-x-6 -top-24 -z-10 h-[520px]"
+        style="background: radial-gradient(640px 300px at 72% 8%, rgb(37 99 235 / 0.08), transparent 70%), radial-gradient(420px 220px at 18% 0%, rgb(37 99 235 / 0.05), transparent 70%)"
+      ></div>
       <div class="lg:col-span-6">
         <p class="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
           <PhChatCircleDots :size="13" class="text-accent" />
@@ -124,7 +129,7 @@ const principles = [
           v-for="(p, i) in products"
           :key="p.id"
           :to="{ path: '/compare', query: { id: p.id } }"
-          class="group overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
+          class="group overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-lg hover:shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:shadow-black/40"
           :class="i === 0 ? 'lg:col-span-3 lg:row-span-2' : 'lg:col-span-2'"
         >
           <div class="overflow-hidden" :class="i === 0 ? 'aspect-[16/9]' : 'aspect-[3/1.4]'">
