@@ -3,14 +3,13 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { PhArrowBendUpLeft, PhCheck, PhCopy, PhPaperclip, PhPaperPlaneRight, PhSparkle, PhX } from '@phosphor-icons/vue'
 import DualPriceCard from '../components/DualPriceCard.vue'
-import { matchProduct, products, cheapest, PLATFORMS, PLAT_KEYS } from '../mock/data'
+import { matchProduct, products, cheapest, PLATFORMS, PLAT_KEYS, bestPlat } from '../mock/data'
 import { copyText } from '../utils/copy'
 import { loadProfile, saveProfile, parseQuery, buildPersonalNote, profileSummary } from '../utils/profile'
 
 const input = ref('')
 const typing = ref(false)
 const listRef = ref(null)
-const activeProduct = ref(null)
 const fileInput = ref(null)
 const attachedImage = ref(null)
 const imgError = ref('')
@@ -18,37 +17,56 @@ const copiedKey = ref(null)
 
 // 用户画像（localStorage 持久化）
 const profile = ref(loadProfile())
-// 当前展示平台：默认取画像常用平台
-const activePlat = ref(profile.value.preferredPlatform || 'jd')
 const summary = computed(() => profileSummary(profile.value))
 
-const state = reactive({
-  messages: [
-    {
-      id: 1,
-      role: 'agent',
-      type: 'text',
-      text: '你好，我是你的个人购物助手。把商品链接粘贴给我，或直接问「XX 怎么选」；我也会记住你的预算、常用平台与会员身份，让推荐更贴你。',
-    },
-  ],
+// 会话模型：左栏是会话切换器，每个会话持有独立的消息流、平台与当前商品
+let uid = 1
+function buildConversation(product, plat) {
+  return [
+    { id: uid++, role: 'agent', type: 'card', product, plat, lead: `已采集「${product.name}」的款式与价格情报：` },
+    { id: uid++, role: 'agent', type: 'compare', product, plat },
+    { id: uid++, role: 'agent', type: 'recommend', product, plat },
+  ]
+}
+
+const sessions = reactive(
+  products.map((p, i) => {
+    const plat = bestPlat(p).plat
+    return {
+      id: p.id,
+      title: `${p.brand} · ${p.name}`,
+      time: ['10:24', '昨天', '周二'][i],
+      product: p,
+      plat,
+      activeProduct: p,
+      messages: buildConversation(p, plat),
+    }
+  }),
+)
+const activeSessionId = ref(sessions[0].id)
+const activeSession = computed(() => sessions.find((s) => s.id === activeSessionId.value))
+const activeProduct = computed(() => activeSession.value.activeProduct)
+// 平台切换跟随当前会话
+const sessionPlat = computed({
+  get: () => activeSession.value.plat,
+  set: (v) => (activeSession.value.plat = v),
 })
 
-const sessions = products.map((p, i) => ({
-  id: p.id,
-  title: `${p.brand} · ${p.name}`,
-  time: ['10:24', '昨天', '周二'][i],
-  product: p,
-}))
-const activeSession = ref(sessions[0].id)
+function switchSession(id) {
+  if (activeSessionId.value === id) return
+  activeSessionId.value = id
+  nextTick(scrollToBottom)
+}
+
+function scrollToBottom() {
+  if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
+}
 
 const samples = ['3000 以内推荐降噪耳机', '保温杯京东买划算吗', '我是学生，洁面乳怎么买最省']
 
-let uid = 2
 function push(msg) {
-  state.messages.push({ id: uid++, ...msg })
-  nextTick(() => {
-    if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
-  })
+  activeSession.value.messages.push({ id: uid++, ...msg })
+  nextTick(scrollToBottom)
 }
 
 function send(text) {
@@ -63,7 +81,7 @@ function send(text) {
     Object.assign(profile.value, updates)
     saveProfile(profile.value)
     // 有画像更新时，优先展示对应平台
-    if (updates.preferredPlatform) activePlat.value = updates.preferredPlatform
+    if (updates.preferredPlatform) sessionPlat.value = updates.preferredPlatform
   } else {
     saveProfile(profile.value)
   }
@@ -130,9 +148,8 @@ function reply(content, hasImage, hasNotes) {
     typing.value = false
     return
   }
-  activeSession.value = product.id
-  activeProduct.value = product
-  const plat = activePlat.value
+  activeSession.value.activeProduct = product
+  const plat = sessionPlat.value
   push({
     role: 'agent',
     type: 'card',
@@ -151,8 +168,8 @@ function reply(content, hasImage, hasNotes) {
   }, 1000)
 }
 
-const best = computed(() => (activeProduct.value ? cheapest(activeProduct.value, activePlat.value) : null))
-const personalNotes = computed(() => (activeProduct.value ? buildPersonalNote(activeProduct.value, activePlat.value, profile.value) : []))
+const best = computed(() => (activeProduct.value ? cheapest(activeProduct.value, sessionPlat.value) : null))
+const personalNotes = computed(() => (activeProduct.value ? buildPersonalNote(activeProduct.value, sessionPlat.value, profile.value) : []))
 const platTabs = PLAT_KEYS.map((k) => ({ key: k, name: PLATFORMS[k].name, accent: PLATFORMS[k].accent }))
 
 onMounted(() => {
@@ -162,25 +179,25 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto grid h-[calc(100dvh-4rem)] max-w-7xl grid-cols-[240px_1fr] overflow-hidden lg:grid-cols-[240px_1fr_360px]">
-    <!-- 左栏：咨询会话 -->
+  <div class="grid h-[calc(100dvh-4rem)] w-full grid-cols-[260px_1fr] overflow-hidden lg:grid-cols-[260px_1fr_380px]">
+    <!-- 左栏：会话切换器 -->
     <aside class="hidden min-h-0 flex-col border-r border-zinc-200/70 md:flex dark:border-zinc-800">
-      <div class="px-5 pb-2 pt-5 text-xs font-medium text-zinc-500 dark:text-zinc-400">历史咨询</div>
+      <div class="px-5 pb-2 pt-5 text-xs font-medium text-zinc-500 dark:text-zinc-400">咨询会话</div>
       <div class="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
         <button
           v-for="s in sessions"
           :key="s.id"
           class="w-full rounded-[10px] px-3 py-2.5 text-left transition-colors"
           :class="
-            activeSession === s.id
+            activeSessionId === s.id
               ? 'bg-accent-soft dark:bg-accent/15'
               : 'hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70'
           "
-          @click="send(`${s.product.name}怎么选？`)"
+          @click="switchSession(s.id)"
         >
           <div
             class="truncate text-[13px]"
-            :class="activeSession === s.id ? 'font-medium text-accent-strong dark:text-blue-300' : ''"
+            :class="activeSessionId === s.id ? 'font-medium text-accent-strong dark:text-blue-300' : ''"
           >
             {{ s.title }}
           </div>
@@ -194,8 +211,8 @@ onMounted(() => {
 
     <!-- 中栏：对话 -->
     <section class="flex min-h-0 min-w-0 flex-col">
-      <div ref="listRef" class="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-        <div v-for="m in state.messages" :key="m.id" class="msg-in flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+      <div ref="listRef" class="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-6">
+        <div v-for="m in activeSession.messages" :key="m.id" class="msg-in flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
           <!-- 用户 -->
           <div v-if="m.role === 'user'" class="max-w-[75%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-white">
             <img v-if="m.image" :src="m.image" :alt="m.text || '用户上传的商品图片'" class="mb-2 max-h-48 rounded-lg object-cover" />
@@ -317,7 +334,8 @@ onMounted(() => {
       </div>
 
       <!-- 输入区 -->
-      <div class="border-t border-zinc-200/70 px-6 py-4 dark:border-zinc-800">
+      <div class="border-t border-zinc-200/70 dark:border-zinc-800">
+        <div class="mx-auto w-full max-w-3xl px-6 py-4">
         <div class="mb-2.5 flex flex-wrap gap-1.5">
           <button
             v-for="s in samples"
@@ -368,6 +386,7 @@ onMounted(() => {
         <p class="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
           AI 仅提供信息与建议，不代下单。价格以平台页面为准。
         </p>
+        </div>
       </div>
     </section>
 
@@ -413,17 +432,17 @@ onMounted(() => {
             :key="t.key"
             class="rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors"
             :class="
-              activePlat === t.key
+              sessionPlat === t.key
                 ? 'text-white'
                 : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
             "
-            :style="activePlat === t.key ? { backgroundColor: t.accent } : {}"
-            @click="activePlat = t.key"
+            :style="sessionPlat === t.key ? { backgroundColor: t.accent } : {}"
+            @click="sessionPlat = t.key"
           >
             {{ t.name }}
           </button>
         </div>
-        <DualPriceCard :product="activeProduct" v-model:plat="activePlat" />
+        <DualPriceCard :product="activeProduct" v-model:plat="sessionPlat" />
 
         <p class="rounded-[10px] bg-accent-soft px-4 py-3 text-[13px] leading-relaxed text-accent-strong dark:bg-accent/15 dark:text-blue-200">
           {{ activeProduct.conclusion }}
@@ -439,20 +458,20 @@ onMounted(() => {
         </div>
 
         <RouterLink
-          :to="{ path: '/coupon', query: { id: activeProduct.id, plat: activePlat } }"
+          :to="{ path: '/coupon', query: { id: activeProduct.id, plat: sessionPlat } }"
           class="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
-          领券步骤（{{ PLATFORMS[activePlat].name }}最低 ¥{{ best.prices[activePlat].b }}）
+          领券步骤（{{ PLATFORMS[sessionPlat].name }}最低 ¥{{ best.prices[sessionPlat].b }}）
         </RouterLink>
         <button
           class="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-accent px-4 py-2.5 text-sm font-medium text-white transition-transform enabled:hover:bg-accent-strong enabled:active:scale-[0.98]"
-          @click="copyCode(activeProduct, activePlat)"
+          @click="copyCode(activeProduct, sessionPlat)"
         >
-          <PhCheck v-if="copiedKey === `${activeProduct.id}-${activePlat}`" :size="15" weight="bold" />
+          <PhCheck v-if="copiedKey === `${activeProduct.id}-${sessionPlat}`" :size="15" weight="bold" />
           <PhCopy v-else :size="15" />
-          {{ copiedKey === `${activeProduct.id}-${activePlat}` ? '已复制' : `复制${PLATFORMS[activePlat].name}口令，去 App 下单` }}
+          {{ copiedKey === `${activeProduct.id}-${sessionPlat}` ? '已复制' : `复制${PLATFORMS[sessionPlat].name}口令，去 App 下单` }}
         </button>
-        <p class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">{{ PLATFORMS[activePlat].name }}渠道口令，复制后打开对应 App 自动跳转。</p>
+        <p class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">{{ PLATFORMS[sessionPlat].name }}渠道口令，复制后打开对应 App 自动跳转。</p>
       </template>
       <!-- 空状态 -->
       <div v-else class="m-auto max-w-[24ch] text-center text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">

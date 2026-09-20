@@ -12,7 +12,14 @@ dist/
 
 # 内部工作文件（不提交）
 .agent/
-#
+#智能体记忆
 .workbuddy
-#
+#环境文件
 .env
+#截图
+.screenshots
+#前端
+frontend-web/node_modules/
+frontend-web/dist/
+frontend-web/.DS_Store
+frontend-web/*.local

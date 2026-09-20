@@ -1,0 +1,52 @@
+# ============================================================
+# price-agent 后端依赖（运行必需）
+# 更新：2026-09-16 ｜ 依据：docs/用户注册与登录-接口契约.md §5
+#
+# 用法：
+#   python -m venv .venv
+#   source .venv/Scripts/activate         # Windows Git Bash
+#   pip install -r requirements-dev.txt   # 开发（含测试依赖）
+#   pip freeze > requirements.lock.txt    # 可选：锁精确版本，供复现
+#
+# 约定：本文件只写「顶层依赖 + 范围约束」，不写死精确版本；
+#      需要精确复现时用 requirements.lock.txt（或 uv lock）锁定。
+# ============================================================
+
+# ---------- Web 框架 ----------
+# fastapi：低于 0.100 不支持 pydantic v2，会被拖回 v1（用法完全不同）
+fastapi>=0.110
+# uvicorn[standard]：[standard] 才带 --reload(watchfiles)/httptools；
+#   Windows 上不含 uvloop（uvloop 仅 *nix），别指望它在 Windows 生效
+uvicorn[standard]>=0.29
+
+# ---------- 数据库 / ORM（异步）----------
+# sqlalchemy：必须 2.0+。1.4 的 async 是实验特性且 API 不同，混用踩坑
+sqlalchemy[asyncio]>=2.0
+# aiomysql：异步 MySQL 驱动。维护偏慢，若在 Python 3.13 上安装/运行异常，
+#   改用 asyncmy（连接串相应改为 mysql+asyncmy://）
+aiomysql>=0.2.0
+# cryptography：MySQL 8 默认 caching_sha2_password 认证必需；
+#   缺了会报 "cryptography is required for sha256_password" 之类
+cryptography>=42
+# greenlet：SQLAlchemy async 运行时依赖。C 扩展，Python 小版本升级常缺预编译 wheel，
+#   版本过旧会在 3.13 上装不上；不够新就升级它
+greenlet>=3.1
+# alembic：必须 1.11+。1.10 及以下不支持 SQLAlchemy 2.0（迁移会直接报错）
+alembic>=1.13
+
+# ---------- 缓存 / 验证码（Redis 已在跑 127.0.0.1:6379）----------
+# redis：用官方 redis.asyncio（异步）。别用已废弃的 aioredis（独立包，勿装）
+redis>=5.0
+# Pillow：仅"自研图形验证码"需要（生成图片）。改用腾讯验证码/极验则不装
+Pillow>=10.3
+
+# ---------- 配置 / 校验 / 安全 ----------
+# pydantic：必须 v2。v1 的 BaseSettings/model 配置写法与 v2 完全不同
+pydantic>=2.7
+# pydantic-settings：v2 起 BaseSettings 从 pydantic 拆到独立包，
+#   必须 from pydantic_settings import BaseSettings（从 pydantic 引会报错）
+pydantic-settings>=2.2
+# email-validator：Pydantic EmailStr 的运行时依赖，不加会 ImportError
+email-validator>=2.1
+# bcrypt：直接用，别配 passlib。passlib 1.7.4 读不到 bcrypt 4.x 的 __about__，会告警甚至报错
+bcrypt>=4.1

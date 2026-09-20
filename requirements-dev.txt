@@ -1,0 +1,16 @@
+# ============================================================
+# price-agent 开发 / 测试依赖
+# 首行 -r 复用运行依赖，避免两份清单漂移
+# ============================================================
+
+-r requirements.txt
+
+# pytest：异步用例需要配 asyncio_mode=auto（写在 pyproject/pytest.ini），
+#   否则每个 async 测试都要手动加 @pytest.mark.asyncio
+pytest>=8
+# pytest-asyncio：0.23 起改了事件循环作用域，未显式设
+#   asyncio_default_fixture_loop_scope 会有 deprecation 警告（不致命）
+pytest-asyncio>=0.23
+# httpx：0.27 起 ASGI 测试必须用 httpx.ASGITransport(app=app)，
+#   不能再像旧版那样给 AsyncClient 直接传 app=（已移除）
+httpx>=0.27
