@@ -17,7 +17,7 @@
 | 点 | 契约原定 | 你的实现 | 处理 |
 |----|---------|---------|------|
 | 驱动 | 同步 `PyMySQL` | **异步 `aiomysql`** | ✅ 以实现为准，契约已同步为异步 |
-| user 字段 | 仅 `email` + `nickname` | 多了 `username` | ⏳ 你定：删掉，还是改成"email / username 双唯一可登录"？ |
+| user 字段 | 原仅 `email` + `nickname` 等 9 字段 | 多了 `username` | ✅ **已定（2026-09-20）**：`users` 收敛为 **5 字段**——`id` `email` `password_hash` `created_at` `last_login_at`；`username` 与 `nickname` / `status` / `updated_at` / `deleted_at` 一并删除。判据见契约 §1.1.1 |
 
 ---
 
@@ -46,7 +46,7 @@
 | 级别 | 问题 | 改法 |
 |------|------|------|
 | P0 | `Mapped[str]` 没给长度 → MySQL 建表直接报错（`VARCHAR` 必须带长度） | `String(254)` / `String(255)` |
-| P0 | 缺契约字段：`nickname` / `status` / `created_at` / `updated_at` / `last_login_at` / `deleted_at` | 按契约 §1.1 补齐 |
+| P0 | 字段定义停在旧版：`user_email` / `username` / `create_time`，且 `id` 是 `Integer` | 按契约 §1.1 **重写为 5 字段模型**（`id` `email` `password_hash` `created_at` `last_login_at`）；判据见契约 §1.1.1 |
 | P1 | 目录 `database/` 语义模糊 | 改 `app/models/user.py`（模型归 `models/`） |
 | P1 | `user_email` 冗余前缀，与契约字段名不符 | 统一为 `email` |
 | P1 | `password_hash` 加了 `index=True` | 删掉——哈希不参与查询，索引白白拖慢写入 |
@@ -150,7 +150,6 @@ async def register(session: AsyncSession, payload: RegisterReq):
     user = User(
         email=payload.email.strip().lower(),
         password_hash=hash_password(payload.password),
-        nickname=payload.nickname or "",
     )
     session.add(user)
     try:
@@ -159,7 +158,7 @@ async def register(session: AsyncSession, payload: RegisterReq):
         await session.rollback()
         raise ConflictError(40901, "邮箱已被注册")
     await session.refresh(user)
-    return {"id": user.id, "email": user.email, "nickname": user.nickname}
+    return {"id": user.id, "email": user.email}
 ```
 
 ### 3.4 为什么这么设计
@@ -182,13 +181,18 @@ async def register(session: AsyncSession, payload: RegisterReq):
 
 ## 5. 整改待办清单
 
-- [ ] 🔴 **`.env` 加入 `.gitignore`**：当前 `.gitignore` 只有 node_modules/dist 等，**没有 `.env` / `.venv` / `__pycache__`** —— 数据库密码有被提交进 Git 的风险
-- [ ] 建虚拟环境 + `requirements.txt` / `requirements-dev.txt`（见 §7）
-- [ ] 拆 `config.py` → `core/config.py` + `db/base.py` + `db/session.py`（见 §6）
-- [ ] 删 `await_only` 导入与空实现，按 §3.1 重写 `get_session`
-- [ ] `database/` → `models/`；补齐 `users` 字段与 `String` 长度
-- [ ] `shcema` → `schemas`
-- [x] 决策已定：**只做 email 登录** → 删掉 `users.username`（与契约 §1.1 一致，无需改契约）
+> ⚠️ 下表是 **2026-09-16 的原始清单**，勾选状态已于 **2026-09-20 更新**；最新状态与新增项见 **§10 第三轮复评**。
+
+- [x] 🔴 **`.env` 加入 `.gitignore`** —— 已加。**但 `.env` 仍被 git 跟踪并已入库**（提交 `69fb606`，内含 MySQL root 密码）→ 见 §10，这是**未解决的遗留安全问题**
+- [x] 建虚拟环境 + `requirements.txt` / `requirements-dev.txt`（见 §7）
+- [x] 拆 `config.py` → `core/config.py` + `database/base.py` + `database/session.py`（见 §6）
+      —— 注意：实际目录是 `database/`（不是 §6.1 示例里的 `db/`）
+- [x] 删 `await_only` 导入与空实现，重写请求级 session 依赖
+      —— 落在 **`app/dependence.py` 的 `get_db_session()`**（不是 `db/session.py`）
+- [ ] 重写 `users` 模型为 **5 字段**（含 `String` 长度、`BigInteger` 主键）—— **未做**：`app/model/user.py` 仍是旧版（`user_email` / `username` / `create_time`、`id` 为 `Integer`）
+- [x] `shcema` → `schemas`
+- [x] 决策已定：**只做 email 登录** → 删掉 `users.username`
+- [x] 决策追加（2026-09-20）：`users` 收敛为 **5 字段**，`nickname` / `status` / `updated_at` / `deleted_at` 一并删除 → 契约 §1.1.1（判据：时间点事件 vs 当前状态）
 
 ---
 
@@ -351,7 +355,7 @@ pip freeze > requirements.lock.txt     # 可选：锁精确版本
 - `app/config.py` 仍是 `os.getenv`、无校验；建议 pydantic-settings —— 缺失时启动即报错，而不是把 `None` 传进 engine 后报晦涩错误（见 §6.1）。
 - `session.py` 里 `async_sessionmaker` 变量名 `AsyncSession` 与 SQLAlchemy 的类同名，可读性差，建议 `SessionLocal`。
 - 目录：`database/` 可只放 `base.py` + `session.py`（数据访问基础设施）；**ORM 模型应独立到 `models/user.py`**，别混在 `database/`。
-- `user` 模型：`username` 待删（已定 email 登录）；`user_email` → `email`（`String(254)`）；`create_time` → `created_at`；补 `nickname / status / updated_at / last_login_at / deleted_at`；`default=func.now()` 建议同时给 `server_default=func.now()`。
+- `user` 模型：**重写为 5 字段**（`id` `email` `password_hash` `created_at` `last_login_at`）——`username` 待删（已定 email 登录）；`user_email` → `email`（`String(254)`）；`create_time` → `created_at`；`id` 用 `BigInteger`；`default=func.now()` 建议同时给 `server_default=func.now()`。**不再补 `nickname`/`status`/`updated_at`/`deleted_at`**（2026-09-20 决策，见契约 §1.1.1）。
 
 ---
 
@@ -624,4 +628,312 @@ DB_URL=Y python -c "from app.config import Settings; print(Settings().db_url)"  
 
 ---
 
-*本文件为本轮「编码 → 代码审查」产物；整改后可据此复评。*
+## 10. 第三轮复评（2026-09-19 ~ 09-20）
+
+### 10.1 已修复 ✅
+
+| 项 | 位置 | 证据 |
+|---|---|---|
+| config 收口为 pydantic-settings | `app/core/config.py` | `model_config` + `Path(__file__).resolve().parents[2] / ".env"`；空参 `Settings()` 实测能读到配置（见实现指引 §4.1） |
+| config / Base / engine 三方拆分 | `core/config.py`、`database/base.py`、`database/session.py` | `import app.database.base` **零副作用** |
+| `echo` 不再硬编码 | `database/session.py` | 现为 `echo=False`（建议后续改 `settings.db_echo`） |
+| 请求级 session 依赖 | `app/dependence.py` 的 `get_db_session()` | `try` 包住 `yield` + `rollback` + 裸 `raise`；**实测异常路径 rollback 生效** |
+| `connect_args` 挂错对象 | `database/session.py` | 已从 `async_sessionmaker` 挪到 `create_async_engine`（详见 §10.3） |
+| MySQL 会话时区钉 UTC | `database/session.py` | 实测 `@@session.time_zone = +00:00`，`NOW()` 比本地时间小 8h |
+| 目录拼写 `shcema` → `schemas` | `app/schemas/` | — |
+| `users` 模型从 `database/` 移出 | `app/model/user.py` | — |
+
+### 10.2 仍待修 🔴 / 🟡
+
+| 级别 | 位置 | 问题 | 改法 |
+|---|---|---|---|
+| 🔴 | `.env` | **被 git 跟踪且已入库**（提交 `69fb606`；remote `github.com/szy0607/price-agent`），内含 MySQL `root` 密码 | `git rm --cached .env` + **改密码**（历史已留痕，仅 untrack 不够） |
+| 🔴 | `.env` | 应用用 **`root`** 连库，违反契约 §9.3「专用最小权限账号」 | 建 `price_agent` 账号并切 `.env` |
+| 🔴 | `app/core/security.py`、`app/core/errors.py` | 均为 **0 字节**，本轮必需 | 见实现指引 §5 / §6 |
+| 🔴 | `app/model/user.py` | 字段仍是旧版：`user_email`/`username`/`create_time` 命名不符；`id` 是 `Integer` 而非 `BigInteger` | 按契约 §1.1 **重写为 5 字段**（不再补 `nickname`/`status`/`updated_at`/`deleted_at`） |
+| 🔴 | `app/schemas/user_sche.py` | 被清空成只剩两行 import | 至少落一个**不含 `password_hash`** 的 `UserResp` |
+| 🔴 | `app/router/{register,log_in}.py` | 前缀仍是 `/register`、`/login`；函数体 `pass` | 改 `/api/v1/auth/*` 并实现 |
+| 🔴 | `app/main.py` | 只有 2 行，无 `include_router` | 挂载路由 + trace_id 中间件 + `/health` |
+| 🟡 | `app/model/` | 目录名用**单数**，契约 §4.3 要求复数 | `model/` → `models/` |
+| 🟡 | `app/database/session.py` | sessionmaker 缺 `class_=AsyncSession`、`autoflush=False` | 按 §3.1 标准写法补齐 |
+| 🟡 | `.gitignore` | 仍缺 `.venv/`、`__pycache__/`、`*.py[cod]`、`.pytest_cache/` | 补上（`.venv/` 自带内容为 `*` 的 `.gitignore`，但显式更清楚） |
+| 🟡 | `app/repository/`、`app/services/`、`app/api/` | 空目录。**git 不跟踪空目录**，别人克隆后不存在 | `repository/` 本轮不建→建议删；`services/` 待建 |
+| 🟢 | `users` 表 | **尚不存在**（实测 `Table 'price_agent.users' doesn't exist`） | 建表前务必 `import models`，否则 `create_all()` 一声不响什么都不建 |
+
+### 10.3 本轮最有价值的一条经验：参数挂错对象 = 静默失效
+
+`connect_args` 挂到了 `async_sessionmaker` 上：
+
+```python
+async_session_local = async_sessionmaker(bind=async_engine, expire_on_commit=False,
+                                         connect_args=_CONNECT_ARGS)   # ❌
+```
+
+**构造时不报错**（参数被静默收下），**直到第一次取 session 才炸**：
+
+```
+TypeError: Session.__init__() got an unexpected keyword argument 'connect_args'
+```
+
+而报错出现在 `dependence.py`，容易往错的方向查；与此同时**时区设置静默失效**。
+**根因**：`async_sessionmaker(**kw)` 的 `kw` 是传给 **`Session` 构造器**的；`connect_args` 属于 `create_engine`。
+
+> 教训：**参数挂错对象不会报错，只会「没效果」或「晚一点才炸」**——比语法错难查得多。
+> 所以每加一个参数，都值得多问一句「**这个参数到底属于谁**」。
+
+---
+
+## 11. 第四轮复评（2026-09-20 晚 · 登录/注册首版落地）
+
+**一句话结论**：`get_db_session()` 本身写得没问题，**问题是它从来没有被调用过**。
+它被当成了「同步上下文管理器」用，而它的真实身份是「FastAPI 依赖」。所以这不是某一行写错，
+而是**对这条链路的形态理解错了一层**——四段全断。
+
+### 11.1 四段链路的实际状态（全部实测）
+
+| # | 应有的形态 | 现在文件里的写法 | 实测结果 |
+|---|---|---|---|
+| ① | 路由形参注入：`session: SessionDep` | `log_in.py`：`async def login(user_email: str, password: str)`，**无 `Depends`** | session 从未产生，依赖从未被调用 |
+| ② | `get_db_session` 只出现在 `Depends()` 里 | `auth_repo.py`：`with get_db_session() as session:` | `TypeError: 'async_generator' object does not support the context manager protocol` |
+| ③ | `await session.scalars(select(...))` | `auth_repo.py`：`session.query(User).filter(...).first()` | `hasattr(AsyncSession, 'query') == False` |
+| ④ | `await session.commit()` | `auth_repo.py`：`session.commit()`，且函数是 `def` 不是 `async def` | 未 `await` → 静默不落库；`close()` 时回滚 |
+
+**②的补充实测**：加 `async with` 也救不回来——
+`TypeError: 'async_generator' object does not support the asynchronous context manager protocol`。
+因为 `get_db_session` 是个**裸的 async generator 函数**，没有 `@asynccontextmanager` 装饰，
+它既不支持 `with` 也不支持 `async with`，**只支持被 FastAPI 的 `Depends` 消费**。
+
+### 11.2 本轮核心：`get_db_session` 到底是给谁用的
+
+**它只应该出现在一个位置——路由（或依赖）的形参里，写函数名，不写括号、不加 `with`：**
+
+```python
+SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+
+async def login(payload: LoginReq, session: SessionDep):
+    ...                       # session 由框架注入，用完自动 close + 归还连接
+```
+
+**判据（一句话，可复用）**：
+> 问自己「**这个函数是给框架调用的，还是给我自己调用的？**」
+> - 给框架（`Depends`）→ 写**函数名**，框架负责调用、负责收尾
+> - 给自己 → 写 `async with SessionLocal()`，**我自己**负责开、负责关
+
+**把这两件事写混，代价是**：`get_db_session` 里的 `except → rollback` 永远不执行、
+`async with SessionLocal()` 的自动归还连接也永远不发生 → **等于整个项目没有连接管理**，
+`pool_size=10` 形同虚设（因为压根没从池里借过）。
+
+> 这是 §10.3「参数挂错对象」的**第二版**：**把「依赖」当成了「工具函数」**。
+> 同样不报编译错、同样要跑到运行时才炸，而且炸点离根因很远——
+> 报错在 `auth_repo.py`，根因是「这段代码本来就不该出现在 `auth_repo.py`」。
+
+### 11.3 P0 清单（🔴 import 即崩 / 阻断）
+
+| 位置 | 问题（实测原文） | 改法 |
+|---|---|---|
+| `app/core/security.py:3` | `from config import settings` → `ModuleNotFoundError: No module named 'config'`。**`app.router.log_in` import 即崩** | `from app.core.config import settings` |
+| `app/schemas/user_sche.py` | `PydanticUserError: A non-annotated attribute was detected`。`Annotated[str, Field(...)]` 缺类型注解 | `user_email: str = Field(...)` |
+| `app/router/log_in.py` | 无 `Depends`、无 `await`、`raise ValueError` → 500；参数裸写 → FastAPI 当 **query 参数**而非 JSON body | 注入 `SessionDep`；改用 `LoginReq` / `RegisterReq` body |
+| `app/router/register.py` | 只校验密码强度就返回成功，**没有查重、没有哈希、没有插库** | 见实现指引 §10 的 `register()` |
+| `app/main.py` | 实测路由表只有 `['/openapi.json','/docs','/docs/oauth2-redirect','/redoc']`，**一个业务路由都没挂** | `include_router(auth_router)` |
+| `app/router/*.py` | 前缀 `/auth`、`/register` ≠ 契约 §2.1 的 `/api/v1/auth/*` | `APIRouter(prefix="/api/v1/auth")` |
+| `users` 表 | 实测库为**空库**：`SHOW TABLES` 返回空 | `import models` 后 `create_all()` |
+
+### 11.4 顺带发现（非 session，但同源）
+
+1. **bcrypt 阻塞事件循环**——实测 cost=12：`hashpw 189ms`、`checkpw 188ms`。
+   在 `async def` 里直接调 = 事件循环停 190ms，登录 QPS 一上来就串行化。
+   建议 `await asyncio.to_thread(hash_password, pw)`。
+2. **~~`check_password_strength` 逻辑写反了~~ —— 本条已更正（2026-09-21 实测）**
+   > ⚠️ **我上一轮写错了**：当时 `import app.core.security` 因 `from config import settings` 就崩，
+   > 那段"实测"**根本没跑成**，我拿推断当实测写了。现已真正跑通，结论不同。
+
+   **实际逻辑没有写反**：`if not has_letter and not has_digit` = 「既没字母**且**没数字才拦」，
+   与它自己的消息「必须包含字母**或**数字」是**自洽的**。实测：
+   `'!!!!!!!!'` → **被正确拒绝**；`'abcdefgh'`、`'12345678'` → 通过。
+
+   **真正的问题是「三处口径不一致」**：
+
+   | 位置 | 口径 | 实测结果 |
+   |---|---|---|
+   | `check_password_strength` 逻辑 | 有字母 **或** 有数字 | `'12345678'`（纯数字）**通过** |
+   | `log_in.py` 的错误消息 | 「必须包含字母**和**数字」 | **消息在说谎** |
+   | 契约 §2.1 | 8–64 且含字母**与**数字 | 未实现 |
+   | `.env` | 6–20 | 与契约的 8–64 不符 |
+
+   **连带隐患**：声明 `->bool` 却 `raise` → 调用方 `if not check_password_strength(...)`
+   **永远不为真**，异常直接冒到 500。要么改成返回 `False`，要么调用方别用 `if not` 包它。
+
+   **另需注意**：强度校验按**字符数**限长（20），bcrypt 按**字节**截断（72）——两者单位不同，
+   见下方第 5 条。
+3. **密码长度口径不一致**——`.env` 是 6~20，契约 §2.1 是 **8–64**。
+4. **防用户枚举没做**——`get_pw_hash` 对「用户不存在」与「密码错」给不同信息。
+   更隐蔽的是**时间差**：不存在时 0ms（不跑 bcrypt），密码错时 188ms，
+   响应时间本身就是枚举信道。实现指引 §10 第⑤条已明确要求两条路径**完全一致**。
+5. **🔴 两个不同的密码会被判定为同一个**（2026-09-21 实测，此前未发现）
+
+   | | 密码 | 字符数 | 字节数 |
+   |---|---|---|---|
+   | A | `'😀' × 20` | 20 | **80** |
+   | B | `'😀' × 18 + '😁' × 2` | 20 | **80** |
+
+   `check_password(B, hash_password(A))` → **`True`**。根因：**A 和 B 的前 72 字节完全相同**
+   （72 ÷ 4 = 18，正好切在第 18 个 emoji 之后），bcrypt 只看前 72 字节 → 尾巴被静默丢弃。
+
+   **根因是单位不匹配**：强度校验按**字符数**限长（≤20），bcrypt 按**字节**截断（72）。
+   4 字节字符 × 20 = 80 > 72 就中招。纯 ASCII 不受影响（20 字符 = 20 字节）。
+
+   **✅ 已处置（2026-09-21）：把 `PW_MAX_LENGTH` 从 20 改成 18。**
+   理由：UTF-8 单字符**最多 4 字节**，`18 × 4 = 72` —— 18 个字符**恒不超过 72 字节**，`[:72]` 永远不会切到东西。实测：
+
+   ```
+   18 个 U+10FFFF（4 字节字符）= 72 字节     -> 不会被 [:72] 截断 ✅
+   pw1='😀'×18（72B） vs pw2='😀'×16+'😁'×2   -> 前72字节不同 ✅
+   check_password(pw2, hash_password(pw1))    -> False ✅（漏洞已堵）
+   ```
+
+   这是**改动最小**的修法。但要知道它**只在「校验先于哈希」时成立**：
+   `hash_password()` 自身仍然写死 `[:72]`，所以任何**绕过 `check_password_strength` 的调用路径**
+   （改密码 / 后台导入 / 测试直接哈希）都还会碰到截断。
+   若要一劳永逸，把 `hash_password` 改成**先 SHA-256 再 bcrypt**（标准做法，彻底消除 72 字节限制）。
+
+   > 附带实测：`'a'*71 + '汉'` 截断到 72 字节后**不是合法 UTF-8**（切在汉字中间）。
+   > 不影响哈希可复现（两边同规则），但说明"截断"这个行为本身就是个坑。
+
+
+### 11.5 与本文件既有约定的冲突
+
+实现指引 §10.1 已拍板 **本轮不加 repository 层**，但 `app/repository/auth_repo.py` 已建。
+该节早已预警两个连带坑，**这次两条全中**：
+
+1. **事务边界碎掉**——`login` 写 `last_login_at`、`register` 的「查重 + 插入 + 唯一索引兜底」，
+   都必须**同一个 session 内**完成；repo 每个函数各开一个 session，做不到。
+2. **契约漂移**——§4.1 分层是 `api → services → db/models`，加一层属于改架构。
+
+处理方式二选一：**删掉 repo 走 service 层**（推荐），或**先改契约再动代码**（`开发流程.md` §5）。
+
+### 11.6 环境事故（2026-09-21）：`.venv` 被 pip 装坏
+
+**症状**：`import pydantic` 正常，但 **`import pydantic_settings` 与 `import fastapi` 双双失败**：
+
+```
+pydantic_core._pydantic_core.SchemaError: Unknown schema type: "models"
+```
+
+**排查走过的弯路**（记下来，下次直接跳过）：先怀疑 cwd / 命名空间包 → **实测证伪**
+（`/f`、项目根、`-I` 隔离模式全崩，但 `import pydantic` 在哪都正常）。
+
+**`pip check` 查不出来**——它只校验依赖约束，报的是 `No broken requirements found.`。
+真正的线索是那条不起眼的 `WARNING: Ignoring invalid distribution ~ip`。
+
+**定位方法**：用 `*.dist-info/RECORD` 里的 sha256 逐文件校验。
+- 注意哈希是 **urlsafe-base64 去掉 `=`**，不是 hex
+- 必须排除「只是 LF→CRLF」：`sha256(data.replace(b"\r\n", b"\n"))` —— 实测 **0 个**能被解释，是真混版
+- 再用 mtime 分组看到「同一个包内两个时间簇」（pydantic：61 个文件 09-19、44 个文件 09-20 21:14）
+
+**体检结果：14 个包内容与自身 RECORD 不符**
+
+| 包 | 不符/总数 | | 包 | 不符/总数 |
+|---|---|---|---|---|
+| pydantic | 44 / 112 | | pip | 2 / 468 |
+| alembic | 12 / 105 | | pydantic_core | 2 / 10 |
+| fastapi | 10 / 63 | | dnspython / pillow / pytest / h11 | 各 1 |
+| sqlalchemy | 7 / 277 | | redis | 3 / 126 |
+| pygments | 6 / 350 | | pydantic_settings | 6 / 28 |
+
+**根因推断（2026-09-21 修正）**：
+~~残骸 `~ip` 是 09-20 21:14 那次安装被中断的铁证~~ —— **这条我说错了**。
+`stat` 实测 `~ip` / `~ip-26.1.2.dist-info` 的 mtime 是 **2026-09-19 15:10**，
+也就是**建 venv 当天 pip 自升级时被中断**留下的，跟 09-20 21:14 那次**不是同一件事**。
+
+目前能确定的是：
+- **09-20 21:14** 有 44 个 `pydantic` 文件（+ 13 个包的各一部分）被写成了**另一个版本的内容**，而 dist-info 与 RECORD 仍是 2.13.5 的
+- 不符的清一色是 `.py` / `.pyi`，`_pydantic_core.cp313-win_amd64.pyd` 本身哈希是**命中的**
+- 因此「新 pydantic 的 `.py` 配旧 `pydantic-core` 的 `.pyd` → 新 pydantic 生成旧 core 不认识的 schema 类型 `"models"`」这个**因果链成立**
+
+但**触发那次部分覆盖的具体动作未能确定**——只能确定它是一次「只写了部分文件、没走完 dist-info 交换」的安装。
+这恰好说明：**这类损坏的危险在于事后无法反推原因**，所以预防（别在进程占用时装包）比事后归因更有价值。
+
+**09-21 处置**：
+1. ✅ `pydantic` / `pydantic_core` 已重装干净 → `import fastapi` / `pydantic_settings` 恢复
+2. ✅ 残骸 `~ip` / `~ip-26.1.2.dist-info` **已删除**（用 Python 的 `shutil.rmtree`，绕开 shell 通配）；
+   `pip check` 的 `Ignoring invalid distribution` 警告已消失，`pip --version` 正常
+3. 🟡 仍有 **11 个包** RECORD 哈希不干净（alembic 12/105、fastapi 10/63、sqlalchemy 7/277、
+   pydantic_settings 6/28、pygments 6/350、redis 3/126、pip 2/468，其余 5 个包各 1 个）
+   —— **实测功能正常**（这些包都能 import、FastAPI 能建应用、SQLAlchemy 可用），属于"脏但可用"，可以不动
+
+**为什么后来 `rm -rf .venv/Lib/site-packages/~*` 会"没反应"**（记下来）：
+`rm -rf` 里的 **`-f` 会把所有错误吞掉**。只要当前目录不是项目根、路径拼错、或通配没展开，
+它就**静默什么都不做、退出码还是 0**——看起来就是"命令无效"。所以删这种带 `~` 的脏东西时：
+- 用**绝对路径**，别依赖 cwd
+- 别加 `-f`（先让它报错），或加 `-v` 看它到底动了什么
+- 或者干脆用 Python：`shutil.rmtree` 绕开 shell 通配与转义问题
+
+**预防**（比修更重要）：
+- **别在服务/进程正在用这个 venv 时 pip install**——Windows 上 `.pyd`/`.exe` 被占用时 pip 换不掉文件
+- **别同时跑两个 pip**（IDE 自动装 + 手动敲）
+- 看到 `~xxx` 残骸就说明**已经出过事**，别忽略那条 WARNING
+
+> 本节的诊断方法已固化为可复用 skill：`py-venv-integrity-check`。
+
+---
+
+## 11.7 §11.6 的重要更正：那个环境**不是用户的**（2026-09-21 晚）
+
+大宋看到命令跑不通，问了一句：「**`.venv` 又是哪里来的环境，我一直在用 `fast` 啊**」——这句话把整件事翻过来了。
+
+### 查证结果
+
+**`.venv` 是我建的，不是大宋的。** 铁证是 `.venv/pyvenv.cfg` 里的 `command` 行：
+
+```
+command = C:\Users\Administrator\.workbuddy\binaries\python\versions\3.13.12\python.exe -m venv F:\price-agent\.venv
+```
+
+那个解释器是 **WorkBuddy 托管的 Python**——也就是**我执行命令时用的那个**。创建于 2026-09-19 15:08。
+
+**大宋一直在用 conda 的 `fast`**（`E:\conda\envs\fast`，Python 3.10.20，建于 2026-05-04）。
+
+### 两个环境对比（实测）
+
+| | `fast`（= 项目环境） | `.venv`（我建的，已删） |
+|---|---|---|
+| Python | **3.10.20** | 3.13.14 |
+| fastapi / sqlalchemy / alembic | 0.136.1 / 2.0.49 / **1.13.2** | 0.141.1 / 2.0.54 / 1.20.0 |
+| pydantic / pydantic-settings | 2.13.3 / 2.14.1 | 2.13.5 / 2.15.0 |
+| aiomysql / bcrypt / greenlet | ✅ | ✅ |
+| **redis / Pillow** | ❌ 缺 | redis ✅ |
+| **langgraph / langchain 一族** | ✅ **有** | ❌ 无 |
+
+**判定 `fast` 才是项目环境**：里面装着 langgraph / langchain / langchain-deepseek / langchain-openai——正是本项目 M1 起的技术栈。
+
+### 我错在哪
+
+§11.6 里我断言「**你的 venv 被装坏了、整个项目 import 就崩**」。
+- `.venv` 里 14 个包半装混版——**是真的**，也修好了
+- 但**「项目跑不起来」这个定性是错的**：大宋用 `fast`，`fast` 一直好着
+
+**根因**：我把**自己的工具环境**默认当成了**用户的环境**。
+
+### 验证：在 `fast` 里重跑一遍，之前所有结论都成立
+
+- 7 个模块全部 import ✅（config / security / schemas / models / database.session / auth_repo / log_in）
+- 密码策略一致：`'!!!!!!!!'` 被拒、`'12345678'` 通过；哈希往返正常
+- **`alembic check` 在 1.13.2 里也有** ✅（原先担心的版本差异不存在）
+- `requirements.txt` 列 13 个包，`fast` 只缺 `redis` 和 `Pillow`
+
+### 处置
+
+- `E:\conda\envs\fast` 定为**项目环境**，文档与命令全部改过来（实现指引 §0.3 有完整口径）
+- `.venv` **已删除**（大宋拍板"能不留就不留"，释放 112MB）
+
+> 📌 **可复用判据（本轮最值钱的一条）**：
+> **报"环境坏了"之前，先确认「这是谁的环境、他到底用哪个」。**
+> `pyvenv.cfg` 的 `command` 行会写明「谁、用什么解释器」建的——先读它，再下结论。
+>
+> 今天我在同一类事情上犯了两次错：**先给结论、后取证**。上午是「`'!!!!!!!!'` 通过校验」（拿推断当实测），
+> 下午是「你的 venv 坏了」（拿自己的环境当他人的）。**先取证，后定性。**
+
+---
+
+*本文件为「编码 → 代码审查」产物；整改后可据此复评。*

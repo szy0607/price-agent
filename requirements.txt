@@ -2,14 +2,19 @@
 # price-agent 后端依赖（运行必需）
 # 更新：2026-09-16 ｜ 依据：docs/用户注册与登录-接口契约.md §5
 #
-# 用法：
-#   python -m venv .venv
-#   source .venv/Scripts/activate         # Windows Git Bash
-#   pip install -r requirements-dev.txt   # 开发（含测试依赖）
-#   pip freeze > requirements.lock.txt    # 可选：锁精确版本，供复现
+# 用法：**本项目的运行环境是 conda 的 `fast`**（E:\conda\envs\fast，Python 3.10.20），
+#       不是项目里的 `.venv`。激活后在项目根直接跑即可：
+#     conda activate fast
+#     cd /d F:\price-agent
+#     pip install -r requirements-dev.txt   # 开发（含测试依赖）
+#     alembic upgrade head
+#   （项目里的 `.venv` 已于 2026-09-21 删除：那是历史遗留的冗余环境，从未被使用。
+#     真要重建：python -m venv .venv && .venv\Scripts\python.exe -m pip install -r requirements.txt）
 #
 # 约定：本文件只写「顶层依赖 + 范围约束」，不写死精确版本；
 #      需要精确复现时用 requirements.lock.txt（或 uv lock）锁定。
+#      ⚠️ 已知缺口（2026-09-21 登记）：`fast` 里实际装有 langgraph / langchain /
+#        langchain-deepseek / langchain-openai（M1 起要用），但本文件**尚未列**——等真正用到再补。
 # ============================================================
 
 # ---------- Web 框架 ----------
@@ -41,7 +46,7 @@ redis>=5.0
 Pillow>=10.3
 
 # ---------- 配置 / 校验 / 安全 ----------
-# pydantic：必须 v2。v1 的 BaseSettings/model 配置写法与 v2 完全不同
+# pydantic：必须 v2。v1 的 BaseSettings/models 配置写法与 v2 完全不同
 pydantic>=2.7
 # pydantic-settings：v2 起 BaseSettings 从 pydantic 拆到独立包，
 #   必须 from pydantic_settings import BaseSettings（从 pydantic 引会报错）

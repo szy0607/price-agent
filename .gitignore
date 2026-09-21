@@ -23,3 +23,6 @@ frontend-web/node_modules/
 frontend-web/dist/
 frontend-web/.DS_Store
 frontend-web/*.local
+__pycache__/
+*.py[cod]
+.venv/

@@ -7,5 +7,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
     db_url : str
+    pw_max_length : int
+    pw_min_length : int
 settings = Settings()
-
