@@ -63,6 +63,35 @@ h3 {
   text-wrap: balance;
 }
 
+/* 路由切换保持上下文连续，聊天工作台切换时不闪屏 */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: none;
+  }
+}
+
+/* 隐藏滚动条：保留滚动功能，界面更干净（页面与聊天区通用） */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 旧版 Edge / IE */
+}
+*::-webkit-scrollbar {
+  display: none; /* Chrome / Safari */
+}
+
 /* 聊天消息进场：轻量上移淡入，不打断阅读 */
 .msg-in {
   animation: msg-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;

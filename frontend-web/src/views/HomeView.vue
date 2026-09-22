@@ -2,7 +2,6 @@
 import { RouterLink } from 'vue-router'
 import {
   PhArrowRight,
-  PhChatCircleDots,
   PhCoins,
   PhEye,
   PhLinkSimple,
@@ -10,6 +9,7 @@ import {
   PhStack,
 } from '@phosphor-icons/vue'
 import DualPriceCard from '../components/DualPriceCard.vue'
+import BrandIcon from '../components/BrandIcon.vue'
 import { apiContract, products, PLATFORMS, bestPlat } from '../mock/data'
 
 const heroProduct = products[0]
@@ -29,7 +29,7 @@ const principles = [
 <template>
   <div>
     <!-- Hero：不对称分栏 + 顶部氛围光（单色低调，避免渐变横幅感） -->
-    <section class="relative mx-auto grid max-w-6xl items-center gap-12 overflow-visible px-6 pb-20 pt-16 lg:grid-cols-12 lg:pt-24">
+    <section class="relative mx-auto grid max-w-7xl items-center gap-12 overflow-visible px-6 pb-20 pt-16 lg:grid-cols-12 lg:pt-24">
       <div
         aria-hidden="true"
         class="pointer-events-none absolute -inset-x-6 -top-24 -z-10 h-[520px]"
@@ -37,7 +37,7 @@ const principles = [
       ></div>
       <div class="lg:col-span-6">
         <p class="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          <PhChatCircleDots :size="13" class="text-accent" />
+          <BrandIcon :size="14" class="text-accent" />
           购物决策助手
         </p>
         <h1 class="text-4xl font-bold leading-[1.1] tracking-tighter md:text-6xl">
@@ -72,7 +72,7 @@ const principles = [
 
     <!-- 数据源：三平台能力表（真实内容表格） -->
     <section class="border-y border-zinc-200/70 bg-white dark:border-zinc-800 dark:bg-zinc-900/40">
-      <div class="mx-auto max-w-6xl px-6 py-16" v-reveal>
+      <div class="mx-auto max-w-7xl px-6 py-16" v-reveal>
         <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">三个平台，一个接口</h2>
         <p class="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400">
           数据来自各平台官方联盟查券 API，只使用查询能力，与推广变现彻底解耦。
@@ -108,7 +108,7 @@ const principles = [
     </section>
 
     <!-- 品类演示：不对称图片网格 -->
-    <section class="mx-auto max-w-6xl px-6 py-16" v-reveal>
+    <section class="mx-auto max-w-7xl px-6 py-16" v-reveal>
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">全品类都问得</h2>
@@ -153,7 +153,7 @@ const principles = [
 
     <!-- 原则：左右分栏 + 2x2 -->
     <section class="border-y border-zinc-200/70 bg-white dark:border-zinc-800 dark:bg-zinc-900/40">
-      <div class="mx-auto grid max-w-6xl gap-12 px-6 py-16 lg:grid-cols-12" v-reveal>
+      <div class="mx-auto grid max-w-7xl gap-12 px-6 py-16 lg:grid-cols-12" v-reveal>
         <div class="lg:col-span-4">
           <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">顾问的本分</h2>
           <p class="mt-3 max-w-[40ch] text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400">
@@ -171,7 +171,7 @@ const principles = [
     </section>
 
     <!-- 接口契约：等宽字体清单 -->
-    <section class="mx-auto max-w-6xl px-6 py-16" v-reveal>
+    <section class="mx-auto max-w-7xl px-6 py-16" v-reveal>
       <div class="grid gap-10 lg:grid-cols-12">
         <div class="lg:col-span-5">
           <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">背后是五个 Agent</h2>
@@ -194,7 +194,7 @@ const principles = [
     </section>
 
     <!-- CTA 收尾 -->
-    <section class="mx-auto max-w-6xl px-6 pb-24" v-reveal>
+    <section class="mx-auto max-w-7xl px-6 pb-24" v-reveal>
       <div class="flex flex-col items-start justify-between gap-6 rounded-2xl bg-accent px-8 py-12 text-white md:flex-row md:items-center">
         <div>
           <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">下一次剁手之前，先问一句</h2>

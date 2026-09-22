@@ -1,6 +1,7 @@
 <script setup>
 import { RouterLink } from 'vue-router'
-import { PhChatCircleDots, PhHouseSimple } from '@phosphor-icons/vue'
+import { PhHouseSimple } from '@phosphor-icons/vue'
+import BrandIcon from '../components/BrandIcon.vue'
 </script>
 
 <template>
@@ -9,8 +10,8 @@ import { PhChatCircleDots, PhHouseSimple } from '@phosphor-icons/vue'
       404
     </p>
     <div class="-mt-8 flex items-center gap-2.5">
-      <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-white">
-        <PhChatCircleDots :size="15" weight="bold" />
+      <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-soft dark:bg-accent/20">
+        <BrandIcon :size="18" />
       </span>
       <h1 class="text-xl font-semibold tracking-tight">这个页面没有上架</h1>
     </div>

@@ -1,6 +1,7 @@
 <script setup>
 import { RouterLink, useRoute } from 'vue-router'
-import { PhChatCircleDots, PhLightning } from '@phosphor-icons/vue'
+import { PhLightning } from '@phosphor-icons/vue'
+import BrandIcon from './components/BrandIcon.vue'
 
 const route = useRoute()
 const links = [
@@ -21,19 +22,19 @@ const links = [
     </a>
     <!-- 顶部导航：单行，高 64px -->
     <header class="sticky top-0 z-40 border-b border-zinc-200/70 bg-zinc-50/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-      <nav class="mx-auto flex h-16 max-w-6xl items-center gap-8 px-6">
-        <RouterLink to="/" class="flex items-center gap-2.5">
-          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
-            <PhChatCircleDots :size="18" weight="bold" />
+      <nav class="flex h-16 w-full items-center gap-3 px-4 sm:gap-8 sm:px-6">
+        <RouterLink to="/" class="flex shrink-0 items-center gap-2.5">
+          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft dark:bg-accent/20">
+            <BrandIcon :size="21" />
           </span>
-          <span class="text-[15px] font-semibold tracking-tight">智能导购 Agent</span>
+          <span class="text-[15px] font-semibold tracking-tight max-[380px]:hidden">智能导购 Agent</span>
         </RouterLink>
-        <div class="ml-auto flex items-center gap-1">
+        <div class="ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto">
           <RouterLink
             v-for="l in links"
             :key="l.to"
             :to="l.to"
-            class="rounded-[10px] px-3.5 py-2 text-sm transition-colors"
+            class="shrink-0 rounded-[10px] px-2.5 py-2 text-sm transition-colors sm:px-3.5"
             :class="
               route.path === l.to
                 ? 'bg-accent-soft font-medium text-accent-strong dark:bg-accent/15 dark:text-blue-300'
@@ -44,25 +45,29 @@ const links = [
           </RouterLink>
           <RouterLink
             to="/chat"
-            class="ml-3 inline-flex items-center gap-1.5 rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-white transition-transform hover:bg-accent-strong active:scale-[0.98]"
+            class="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-[10px] bg-accent px-3 py-2 text-sm font-medium text-white transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
           >
             <PhLightning :size="15" weight="bold" />
-            开始咨询
+            <span class="max-[430px]:hidden">开始咨询</span>
           </RouterLink>
         </div>
       </nav>
     </header>
 
     <main id="main" class="flex-1">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <Transition name="page" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
     </main>
 
-    <footer class="border-t border-zinc-200/70 dark:border-zinc-800">
-      <div class="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8 md:flex-row md:items-start md:justify-between">
+    <footer v-if="route.path !== '/chat'" class="border-t border-zinc-200/70 dark:border-zinc-800">
+      <div class="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 md:flex-row md:items-start md:justify-between">
         <div class="text-[13px] text-zinc-500 dark:text-zinc-400">
           <div class="flex items-center gap-2.5">
-            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-white">
-              <PhChatCircleDots :size="13" weight="bold" />
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-accent-soft dark:bg-accent/20">
+              <BrandIcon :size="16" />
             </span>
             <span class="font-medium text-zinc-700 dark:text-zinc-300">智能导购 Agent</span>
           </div>
