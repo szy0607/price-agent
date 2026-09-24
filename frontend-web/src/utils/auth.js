@@ -10,9 +10,15 @@ export function isAuthenticated() {
 }
 
 export function setAuthEmail(email) {
-  if (typeof window !== 'undefined') window.localStorage.setItem(AUTH_EMAIL_KEY, email)
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(AUTH_EMAIL_KEY, email)
+    window.dispatchEvent(new Event('price-agent-auth-changed'))
+  }
 }
 
 export function clearAuth() {
-  if (typeof window !== 'undefined') window.localStorage.removeItem(AUTH_EMAIL_KEY)
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_EMAIL_KEY)
+    window.dispatchEvent(new Event('price-agent-auth-changed'))
+  }
 }

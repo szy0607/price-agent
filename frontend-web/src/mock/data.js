@@ -8,6 +8,11 @@
  * 演示价格仅为区间模拟，正式版由联盟查券 API 返回实时数据。
  */
 
+/** 本地静态资源（public/images/），自动适配 vite base 路径 */
+const headphoneImg = `${import.meta.env.BASE_URL}images/headphone.jpg`
+const bottleImg = `${import.meta.env.BASE_URL}images/bottle.jpg`
+const cleanserImg = `${import.meta.env.BASE_URL}images/cleanser.jpg`
+
 export const PLATFORMS = {
   taobao: { name: '淘宝', api: 'taobao.tbk.item.get', keyFields: ['预估到手价', '优惠券', '促销利益点', '销量'], register: '淘宝客个人可注册', accent: '#ff5000' },
   jd: { name: '京东', api: 'jd.union.open.goods.query', keyFields: ['PLUS 会员价', '优惠券', '拼购价', '低至到手价'], register: '京粉个人可注册', accent: '#e1251b' },
@@ -38,13 +43,13 @@ export const products = [
     name: 'WH-1000XM5 无线降噪耳机',
     model: 'WH-1000XM5',
     desc: '头戴式主动降噪耳机，8 麦克风降噪系统，LDAC 高解析无线，通勤与学习场景。',
-    image: 'https://picsum.photos/seed/priceagent-xm5/960/720',
+    image: headphoneImg,
     conclusion:
       '追求性价比选「黑色」：拼多多百亿补贴约 2199 元最低。京东 PLUS 会员价 2249 元且售后最快；淘宝渠道券 2349 元。在意音质选 LDAC + 30mm 镀铝振膜，三款颜色核心规格一致，仅颜色差异。',
     skus: [
       {
         name: '黑色',
-        image: 'https://picsum.photos/seed/priceagent-xm5-black/240/240',
+        image: headphoneImg,
         stock: '有货',
         specs: { 颜色: '黑色', 驱动单元: '30mm 镀铝液晶振膜', 蓝牙: '5.2 / LDAC', 续航: '30h（开降噪）/ 40h', 重量: '约 250g', 快充: '3 分钟 ≈ 3 小时' },
         prices: {
@@ -67,7 +72,7 @@ export const products = [
       },
       {
         name: '银色',
-        image: 'https://picsum.photos/seed/priceagent-xm5-silver/240/240',
+        image: headphoneImg,
         stock: '有货',
         specs: { 颜色: '银色', 驱动单元: '30mm 镀铝液晶振膜', 蓝牙: '5.2 / LDAC', 续航: '30h（开降噪）/ 40h', 重量: '约 250g', 快充: '3 分钟 ≈ 3 小时' },
         prices: {
@@ -90,7 +95,7 @@ export const products = [
       },
       {
         name: '深蓝',
-        image: 'https://picsum.photos/seed/priceagent-xm5-blue/240/240',
+        image: headphoneImg,
         stock: '库存紧张',
         specs: { 颜色: '深蓝', 驱动单元: '30mm 镀铝液晶振膜', 蓝牙: '5.2 / LDAC', 续航: '30h（开降噪）/ 40h', 重量: '约 250g', 快充: '3 分钟 ≈ 3 小时' },
         prices: {
@@ -120,13 +125,13 @@ export const products = [
     name: 'SM-SA 系列不锈钢保温杯',
     model: 'SM-SA48 / SM-SA60',
     desc: '一键弹盖超轻保温杯，约 200g，双层真空，通勤、户外与母婴场景。',
-    image: 'https://picsum.photos/seed/priceagent-zojirushi/960/720',
+    image: bottleImg,
     conclusion:
       '通勤自用选「480ml 黑色」：京东 PLUS 价 169 元最划算。常泡茶或需更大容量选「600ml」款。颜色仅外观差异，保温性能一致（6 小时 ≥75℃）。',
     skus: [
       {
         name: '480ml · 黑色',
-        image: 'https://picsum.photos/seed/priceagent-sa48-black/240/240',
+        image: bottleImg,
         stock: '有货',
         specs: { 型号: 'SM-SA48-BM', 容量: '480ml', 内胆: '304 不锈钢（双层真空）', 保温: '6h ≥ 75℃', 重量: '约 200g', 杯盖: '一键弹盖' },
         prices: {
@@ -149,7 +154,7 @@ export const products = [
       },
       {
         name: '480ml · 天蓝',
-        image: 'https://picsum.photos/seed/priceagent-sa48-aqua/240/240',
+        image: bottleImg,
         stock: '有货',
         specs: { 型号: 'SM-SA48-AQ', 容量: '480ml', 内胆: '304 不锈钢（双层真空）', 保温: '6h ≥ 75℃', 重量: '约 200g', 杯盖: '一键弹盖' },
         prices: {
@@ -172,7 +177,7 @@ export const products = [
       },
       {
         name: '600ml · 黑色',
-        image: 'https://picsum.photos/seed/priceagent-sa60-black/240/240',
+        image: bottleImg,
         stock: '有货',
         specs: { 型号: 'SM-SA60-BM', 容量: '600ml', 内胆: '304 不锈钢（双层真空）', 保温: '6h ≥ 75℃', 重量: '约 250g', 杯盖: '一键弹盖' },
         prices: {
@@ -202,13 +207,13 @@ export const products = [
     name: '净润洗面霜 100g',
     model: '净润洗面霜',
     desc: '氨基酸表活洁面，弱酸性配方，无香料无色素，敏感肌可用。',
-    image: 'https://picsum.photos/seed/priceagent-freeplus/960/720',
+    image: cleanserImg,
     conclusion:
       '自用推荐「两支装」：拼多多百亿补贴后约 168 元，单支成本最低。首次尝试先买「单支装」试肤；京东 PLUS 价 112 元且物流最快，适合急用。',
     skus: [
       {
         name: '单支装 100g',
-        image: 'https://picsum.photos/seed/priceagent-freeplus-single/240/240',
+        image: cleanserImg,
         stock: '有货',
         specs: { 规格: '100g / 支', 表活: '氨基酸表活', pH: '弱酸性（约 5.5）', 适用: '全肤质 / 敏感肌', 配方: '无香料无色素' },
         prices: {
@@ -231,7 +236,7 @@ export const products = [
       },
       {
         name: '两支装（约 4 个月量）',
-        image: 'https://picsum.photos/seed/priceagent-freeplus-duo/240/240',
+        image: cleanserImg,
         stock: '有货',
         specs: { 规格: '100g × 2', 表活: '氨基酸表活', pH: '弱酸性（约 5.5）', 适用: '全肤质 / 敏感肌', 配方: '无香料无色素' },
         prices: {
@@ -254,7 +259,7 @@ export const products = [
       },
       {
         name: '替换装 90g',
-        image: 'https://picsum.photos/seed/priceagent-freeplus-refill/240/240',
+        image: cleanserImg,
         stock: '有货',
         specs: { 规格: '90g / 支', 表活: '氨基酸表活', pH: '弱酸性（约 5.5）', 适用: '需自备按压瓶', 配方: '无香料无色素' },
         prices: {

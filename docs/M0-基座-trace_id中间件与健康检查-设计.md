@@ -358,3 +358,257 @@ def pick():                                          # ← 选一个健康的（
 
 - 将来上线配探针时，**`interval` / `timeout` / `threshold` 三个旋钮拧的都是"窗口期多长"**——不是"安不安全"
 - M7 若要把 `/health` 拆成 `liveness` + `readiness`，本节的实测数字就是依据（readiness 的窗口直接等于用户受损时长）
+
+---
+
+## 9. 模板（**由大宋实现** · 骨架，不是成品）
+
+> ⚠️ **这是骨架。请把每处 `# ←` 注释里的"为什么"读进去再写**——换个场景时，只有理解理由才不会写歪。
+> 顺序按 §5：① → ⑥。其中 **④ 是改现有文件**，其余新建。
+> ⚠️ 本节模板**尚未实测**：它基于 §1 的四条实测结论写成，但六份文件拼起来能否一次跑通，**要等你写完自测**。
+
+### 9.1 `app/core/trace.py`（新建 · 第一步）
+
+```python
+"""请求级 trace_id 的存放与取用。
+
+为什么单独一个文件：写它的是中间件、读它的是日志 Filter —— 两者不能互相 import，
+需要一个双方都依赖、且自身零依赖的公共点。这正是 core 层该放的东西。
+"""
+import contextvars
+
+TRACE_HEADER = "X-Trace-Id"
+
+# 用 ContextVar 而不是模块级变量：ContextVar 是 task 局部的，uvicorn 每请求起独立
+# task → 天然按请求隔离。模块级变量会被并发请求互相覆盖。
+# default=None：请求上下文之外（启动期、定时任务）读到 None 是正常情况，不是错误。
+_trace_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id", default=None)
+
+
+def set_trace_id(trace_id: str) -> contextvars.Token:
+    """由中间件调用。返回的 token 必须留着，用它 reset。"""
+    return _trace_id.set(trace_id)
+
+
+def reset_trace_id(token: contextvars.Token) -> None:
+    """由中间件在 finally 里调用，把值还回去。"""
+    _trace_id.reset(token)
+
+
+def get_trace_id() -> str | None:
+    """由日志 Filter 调用。拿不到 request 的场景（日志）统一走这里。"""
+    return _trace_id.get()
+```
+
+### 9.2 `app/core/middleware.py`（新建）
+
+```python
+"""请求追踪中间件：给每个请求发一个 trace_id，并写回响应头。"""
+import uuid
+
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.core.trace import TRACE_HEADER, reset_trace_id, set_trace_id
+
+
+class TraceMiddleware:
+    """纯 ASGI 中间件 —— 不用 @app.middleware("http")。
+
+    为什么：实测两者在 contextvar 可见性上完全等价（2026-09-24 实测，见 §1），
+    但 BaseHTTPMiddleware 会额外包一层 anyio task group，对流式响应与
+    BackgroundTasks 有已知干扰 —— 而 M4 明确要做流式。等价就选风险小的那个。
+
+    ⚠️ 它管不了 500 响应的头：@app.exception_handler(Exception) 挂在最外层
+    ServerErrorMiddleware 上，捕获后直接返回响应、不再流经任何用户中间件。
+    500 的 X-Trace-Id 由 core/errors.py 的 _h_exc 自己补（见 9.4）。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # 必须判断 scope type：uvicorn 启动时的 lifespan 消息走同一个入口，
+        # 它没有 scope["state"]、也不会发 http.response.start —— 不排除会直接崩。
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # 本轮总是自己生成，不从外部透传。透传要额外做长度 + 字符集清洗，
+        # 否则是日志注入（CWE-117）：攻击者传 "abc\nINFO 用户登录成功" 就能伪造日志行。
+        trace_id = uuid.uuid4().hex
+
+        token = set_trace_id(trace_id)                 # 通道 ①：给日志 Filter
+
+        # 通道 ②：给异常处理器。必须有它 —— 因为下面的 reset 会先于
+        # ServerErrorMiddleware 的处理器执行，那时 contextvar 已经归 None（实测）。
+        scope.setdefault("state", {})
+        scope["state"]["trace_id"] = trace_id
+
+        async def send_with_trace_id(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)[TRACE_HEADER] = trace_id
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_trace_id)
+        finally:
+            # 可以放心 reset：异常处理器读的是 scope["state"]，不依赖 contextvar 时序。
+            reset_trace_id(token)
+```
+
+### 9.3 `app/core/logging.py`（新建）
+
+```python
+"""日志配置：让每条业务日志自动带上当前请求的 trace_id。"""
+import logging
+
+from app.core.trace import get_trace_id
+
+_FORMAT = "%(asctime)s %(levelname)-8s [%(trace_id)s] %(name)s: %(message)s"
+
+
+class TraceIdFilter(logging.Filter):
+    """把 trace_id 注入每条 LogRecord。
+
+    为什么用 Filter 而不是在每处 logger.info 里手写 trace_id：
+    ① 手写一定会漏；② 业务代码不该关心日志长什么样。
+    请求上下文之外（启动日志、定时任务）拿不到 —— 填 "-"，不是报错。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.trace_id = get_trace_id() or "-"
+        return True                        # 返回 False 会丢弃这条日志
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(_FORMAT))
+    handler.addFilter(TraceIdFilter())
+
+    root = logging.getLogger()
+    root.handlers = [handler]              # 覆盖默认 handler，避免同一条日志打两遍
+    root.setLevel(level)
+```
+
+> ⚠️ **实测待确认**：uvicorn 自带的 logger（`uvicorn.access` / `uvicorn.error`）默认 `propagate=False`，
+> 所以**它们不会带 trace_id**，也不会被我们的 handler 接管（不会重复打印）。业务 logger（`app.*`）不受影响。
+> 要统一得改 uvicorn 的 `--log-config`，**本轮不做**。写完请扫一眼启动日志有没有重复行。
+
+### 9.4 `app/core/errors.py`（**改现有文件** · 两处）
+
+**改动 1 —— 给 `envelope()` 加 `headers` 参数**（handler 要能带响应头）：
+
+```python
+def envelope(code:int,msg:str,http_status:int,data=None,headers:dict|None=None) -> JSONResponse:
+    return JSONResponse(
+        status_code=http_status,
+        content={"code":code,"msg":msg,"data":data},
+        headers=headers,
+    )
+```
+
+**改动 2 —— `_h_exc` 补 `X-Trace-Id`**（§1 结论 1 的唯一出路）：
+
+```python
+    @app.exception_handler(Exception)
+    async def _h_exc(request:Request,exc:Exception)->JSONResponse:
+        # 为什么从 request.state 取、不用 contextvar：
+        # 异常冒泡时中间件的 finally: reset 已经执行，contextvar 已归 None（实测）。
+        # request.state 存在 scope["state"] 里，与 request 同生命周期，不受 reset 影响。
+        trace_id = getattr(request.state,"trace_id",None)
+        logger.exception("未处理异常 %s %s trace_id=%s",request.method,request.url.path,trace_id)
+        return envelope(
+            ErrorCode.INTERNAL,"内部服务器错误",500,
+            headers={TRACE_HEADER:trace_id} if trace_id else None,
+        )
+```
+（另需在文件顶部加 `from app.core.trace import TRACE_HEADER`）
+
+> ✅ **循环 import 检查**：`core/trace.py` 零依赖（只 import `contextvars`）→ `core/errors.py` import 它安全。
+
+### 9.5 `app/router/health.py`（新建）
+
+```python
+"""健康检查。给负载均衡 / k8s 探针 / 部署脚本 / 你自己 curl 用。
+
+三条设计要点，每条对应一个会踩的坑：
+① 必须真探数据库：否则只能证明"进程还在"，而事故往往是"进程活着、库连不上"
+② 必须自己 try/except：用 Depends(get_db_session) 时库连不上会抛异常 → 兜底处理器
+   返回 500（不是 503），还把预期的运维状态记成"未处理异常"
+③ 必须加超时：库卡住时 /health 不能陪着挂。注意本项目 async_engine 配了
+   pool_timeout=30s —— 健康检查自己的超时必须**远小于**它，否则会先撞池超时
+"""
+import asyncio
+import logging
+
+from fastapi import APIRouter
+from sqlalchemy import text
+from starlette.responses import JSONResponse
+
+from app.core.errors import ErrorCode, success
+from app.database.session import async_engine
+
+logger = logging.getLogger(__name__)
+
+health_router = APIRouter(tags=["health"])
+
+_DB_PROBE_TIMEOUT = 2.0
+
+
+async def _probe_db() -> None:
+    async with async_engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+# 返回注解写 JSONResponse 是安全的：FastAPI 遇到 Response 子类会跳过 response_model。
+@health_router.get("/health")
+async def health() -> JSONResponse:
+    try:
+        await asyncio.wait_for(_probe_db(), timeout=_DB_PROBE_TIMEOUT)
+    except Exception:
+        # 用 warning 而不是 exception：库连不上是「预期状态」，
+        # 记成 bug 堆栈会污染日志，把真正的问题淹掉。
+        logger.warning("健康检查失败：数据库不可达")
+        return JSONResponse(
+            status_code=503,
+            content={"code": ErrorCode.INTERNAL, "msg": "内部服务器错误", "data": None},
+        )
+    return JSONResponse(status_code=200, content=success({"status": "ok"}))
+```
+
+> 🔴 **不健康必须返 `503`**（不是 200）。返 200 的话 LB 永远不会摘掉坏实例 —— §8 有实测。
+
+### 9.6 `app/main.py`（**改装配**）
+
+```python
+from fastapi import FastAPI
+
+from app.core.errors import register_exception_handlers
+from app.core.logging import setup_logging
+from app.core.middleware import TraceMiddleware
+from app.router.health import health_router
+from app.router.log_in import auth_router
+
+setup_logging()
+
+app = FastAPI()
+register_exception_handlers(app)
+app.add_middleware(TraceMiddleware)
+app.include_router(auth_router)
+app.include_router(health_router)
+```
+
+> ⚠️ 两条要记住：
+> - `add_middleware` **必须在 app 启动前**调用，启动后再加会
+>   `RuntimeError: Cannot add middleware after an application has started`。模块级调用天然满足。
+> - 多个中间件时，**后 `add` 的在更外层**（Starlette 内部 `insert(0, ...)`）。现在只有一个，先记着。
+
+### 9.7 写完先自己跑这 6 条
+
+- [ ] `curl http://127.0.0.1:8000/health` → `200` + `{"code":0,"msg":"success","data":{"status":"ok"}}`
+- [ ] **停掉 MySQL**（或改错 `.env` 密码后重启）→ `/health` → **`503`**（不是 200、不是 500）
+- [ ] `curl -i http://127.0.0.1:8000/health` → 响应头有 `X-Trace-Id`
+- [ ] 随便打一个**会 500 的请求**（可临时加个 `/boom` 路由）→ 响应头**也有** `X-Trace-Id`
+- [ ] 连打两次 → 两次的 `X-Trace-Id` **不同**
+- [ ] 日志里每条业务日志都带 `[...]` 里那块 trace_id，且与响应头一致

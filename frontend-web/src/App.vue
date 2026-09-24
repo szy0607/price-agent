@@ -1,9 +1,23 @@
 <script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { PhLightning } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
+import { isAuthenticated } from './utils/auth'
 
 const route = useRoute()
+const authenticated = ref(isAuthenticated())
+const showFunctionalNav = computed(() => route.name !== 'auth' && authenticated.value)
+const isAuthPage = computed(() => route.name === 'auth')
+const syncAuth = () => { authenticated.value = isAuthenticated() }
+onMounted(() => {
+  window.addEventListener('storage', syncAuth)
+  window.addEventListener('price-agent-auth-changed', syncAuth)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('storage', syncAuth)
+  window.removeEventListener('price-agent-auth-changed', syncAuth)
+})
 const links = [
   { to: '/chat', label: '智能咨询' },
   { to: '/compare', label: '款式对比' },
@@ -21,7 +35,14 @@ const links = [
       跳到主要内容
     </a>
     <!-- 顶部导航：单行，高 64px -->
-    <header class="sticky top-0 z-40 border-b border-zinc-200/70 bg-zinc-50/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
+    <header
+      class="top-0 z-40 backdrop-blur transition-colors"
+      :class="
+        isAuthPage
+          ? 'absolute inset-x-0 border-b border-transparent bg-transparent dark:bg-transparent'
+          : 'sticky border-b border-zinc-200/70 bg-zinc-50/85 dark:border-zinc-800 dark:bg-zinc-950/85'
+      "
+    >
       <nav class="flex h-16 w-full items-center gap-3 px-4 sm:gap-8 sm:px-6">
         <RouterLink to="/" class="flex shrink-0 items-center gap-2.5">
           <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft dark:bg-accent/20">
@@ -29,7 +50,7 @@ const links = [
           </span>
           <span class="text-[15px] font-semibold tracking-tight max-[380px]:hidden">智能导购 Agent</span>
         </RouterLink>
-        <div class="ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto">
+        <div v-if="showFunctionalNav" class="ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto">
           <RouterLink
             v-for="l in links"
             :key="l.to"
@@ -44,12 +65,6 @@ const links = [
             {{ l.label }}
           </RouterLink>
           <RouterLink
-            to="/auth"
-            class="shrink-0 rounded-[10px] px-2.5 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100 sm:px-3.5"
-          >
-            登录
-          </RouterLink>
-          <RouterLink
             to="/chat"
             class="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-[10px] bg-accent px-3 py-2 text-sm font-medium text-white transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
           >
@@ -57,6 +72,13 @@ const links = [
             <span class="max-[430px]:hidden">开始咨询</span>
           </RouterLink>
         </div>
+        <RouterLink
+          v-else-if="!isAuthPage"
+          to="/auth"
+          class="ml-auto shrink-0 rounded-[10px] px-3.5 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent-soft dark:hover:bg-accent/15"
+        >
+          登录
+        </RouterLink>
       </nav>
     </header>
 
@@ -81,7 +103,7 @@ const links = [
             本工具仅提供信息聚合与决策建议：不代下单、不代支付、不提供推广链接。价格与券信息以平台页面实时展示为准。
           </p>
         </div>
-        <nav class="flex items-center gap-5 text-[13px]" aria-label="页脚导航">
+        <nav v-if="showFunctionalNav" class="flex items-center gap-5 text-[13px]" aria-label="页脚导航">
           <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
             {{ l.label }}
           </RouterLink>
