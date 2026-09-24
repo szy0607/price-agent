@@ -8,5 +8,11 @@ export default defineConfig({
   server: {
     host: true,
     port: 5174,
+    proxy: {
+      '/auth': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
   },
 })

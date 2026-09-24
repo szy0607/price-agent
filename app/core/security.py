@@ -1,6 +1,8 @@
 import re
 import bcrypt
 from app.core.config import settings
+from app.core.errors import ErrorCode, BizError
+
 pw_max_length = settings.pw_max_length
 pw_min_length = settings.pw_min_length
 _has_letter = re.compile(r"[a-zA-Z]")
@@ -21,7 +23,7 @@ def check_password(raw_password:str,hashed_password:str)->bool:
 #校验密码强度
 def check_password_strength(raw_password:str)->bool:
     if not pw_min_length<=len(raw_password)<=pw_max_length:
-        raise ValueError(f"密码长度必须在{pw_min_length}到{pw_max_length}之间")
-    if not _has_letter.search(raw_password) and not _has_digit.search(raw_password):
-        raise ValueError(f"密码必须包含字母或数字")
+        raise BizError(ErrorCode.PARAM_INVALID,f"密码长度必须在{pw_min_length}到{pw_max_length}之间")
+    if not _has_letter.search(raw_password) or not _has_digit.search(raw_password):
+        raise BizError(ErrorCode.PARAM_INVALID,"密码必须包含字母且数字")
     return True

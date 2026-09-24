@@ -44,6 +44,12 @@ const links = [
             {{ l.label }}
           </RouterLink>
           <RouterLink
+            to="/auth"
+            class="shrink-0 rounded-[10px] px-2.5 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100 sm:px-3.5"
+          >
+            登录
+          </RouterLink>
+          <RouterLink
             to="/chat"
             class="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-[10px] bg-accent px-3 py-2 text-sm font-medium text-white transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
           >

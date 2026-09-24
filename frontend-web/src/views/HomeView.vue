@@ -199,7 +199,7 @@ const principles = [
         <div>
           <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">下一次剁手之前，先问一句</h2>
           <p class="mt-2 max-w-[50ch] text-sm leading-relaxed text-blue-100">
-            免登录、免安装，打开网页就能咨询。每一分钱怎么省，都摆在你眼前。
+            登录后即可开始咨询，无需安装。每一分钱怎么省，都摆在你眼前。
           </p>
         </div>
         <RouterLink

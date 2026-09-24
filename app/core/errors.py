@@ -6,13 +6,13 @@ from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 logger = logging.getLogger(__name__)
 class ErrorCode:
-    PARAM_INVALID = 40001
-    CAPTCHA_INVALID = 40002
-    SESSION_INVALID = 40101
-    CREDENTIALS = 40102
-    EMAIL_TAKEN = 40901
-    RATE_LIMITED = 42901
-    INTERNAL = 50000
+    PARAM_INVALID = 40001#参数无效验失败
+    CAPTCHA_INVALID = 40002#验证码无效
+    SESSION_INVALID = 40101#会话无效
+    CREDENTIALS = 40102#身份验证失败
+    EMAIL_TAKEN = 40901#邮箱已存在
+    RATE_LIMITED = 42901#请求频率过快
+    INTERNAL = 50000#内部错误
 
 CODE_HTTP_STATUS : dict[int,int] = {
     40001:400,

@@ -652,7 +652,7 @@ DB_URL=Y python -c "from app.config import Settings; print(Settings().db_url)"  
 | 🔴 | `app/core/security.py`、`app/core/errors.py` | 均为 **0 字节**，本轮必需 | 见实现指引 §5 / §6 |
 | 🔴 | `app/model/user.py` | 字段仍是旧版：`user_email`/`username`/`create_time` 命名不符；`id` 是 `Integer` 而非 `BigInteger` | 按契约 §1.1 **重写为 5 字段**（不再补 `nickname`/`status`/`updated_at`/`deleted_at`） |
 | 🔴 | `app/schemas/user_sche.py` | 被清空成只剩两行 import | 至少落一个**不含 `password_hash`** 的 `UserResp` |
-| 🔴 | `app/router/{register,log_in}.py` | 前缀仍是 `/register`、`/login`；函数体 `pass` | 改 `/api/v1/auth/*` 并实现 |
+| 🔴 | `app/router/{register,log_in}.py` | 前缀仍是 `/register`、`/login`；函数体 `pass` | ✅ 已实现。⚠️ 2026-09-23 前缀口径**改为 `/auth/*`**（按代码回写契约，不挂 `/api/v1`，见契约 §2.0） |
 | 🔴 | `app/main.py` | 只有 2 行，无 `include_router` | 挂载路由 + trace_id 中间件 + `/health` |
 | 🟡 | `app/model/` | 目录名用**单数**，契约 §4.3 要求复数 | `model/` → `models/` |
 | 🟡 | `app/database/session.py` | sessionmaker 缺 `class_=AsyncSession`、`autoflush=False` | 按 §3.1 标准写法补齐 |
@@ -736,7 +736,7 @@ async def login(payload: LoginReq, session: SessionDep):
 | `app/router/log_in.py` | 无 `Depends`、无 `await`、`raise ValueError` → 500；参数裸写 → FastAPI 当 **query 参数**而非 JSON body | 注入 `SessionDep`；改用 `LoginReq` / `RegisterReq` body |
 | `app/router/register.py` | 只校验密码强度就返回成功，**没有查重、没有哈希、没有插库** | 见实现指引 §10 的 `register()` |
 | `app/main.py` | 实测路由表只有 `['/openapi.json','/docs','/docs/oauth2-redirect','/redoc']`，**一个业务路由都没挂** | `include_router(auth_router)` |
-| `app/router/*.py` | 前缀 `/auth`、`/register` ≠ 契约 §2.1 的 `/api/v1/auth/*` | `APIRouter(prefix="/api/v1/auth")` |
+| `app/router/*.py` | 前缀 `/auth`、`/register` ≠ 契约 §2.1 的 `/api/v1/auth/*` | ✅ 2026-09-23 已定：**前缀口径是 `/auth/*`**（按代码回写契约，不挂 `/api/v1`） |
 | `users` 表 | 实测库为**空库**：`SHOW TABLES` 返回空 | `import models` 后 `create_all()` |
 
 ### 11.4 顺带发现（非 session，但同源）
