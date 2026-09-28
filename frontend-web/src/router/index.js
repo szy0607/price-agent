@@ -7,6 +7,10 @@ const routes = [
   { path: '/chat', name: 'chat', component: () => import('../views/ChatView.vue'), meta: { title: '智能咨询', requiresAuth: true } },
   { path: '/compare', name: 'compare', component: () => import('../views/CompareView.vue'), meta: { title: '款式对比', requiresAuth: true } },
   { path: '/coupon', name: 'coupon', component: () => import('../views/CouponView.vue'), meta: { title: '领券指引', requiresAuth: true } },
+  // v0.6 新增功能：内容未开发，先注册占位路由（ComingSoonView 按 route.name 取对应占位信息）
+  { path: '/wishlist', name: 'wishlist', component: () => import('../views/ComingSoonView.vue'), meta: { title: '心愿单与购买决策', requiresAuth: true } },
+  { path: '/items', name: 'items', component: () => import('../views/ComingSoonView.vue'), meta: { title: '个人物品库', requiresAuth: true } },
+  { path: '/spending', name: 'spending', component: () => import('../views/ComingSoonView.vue'), meta: { title: '消费记录与预算', requiresAuth: true } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { title: '页面不存在' } },
 ]
 

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { PhLightning } from '@phosphor-icons/vue'
+import { PhChartPie, PhHeart, PhLightning, PhPackage } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
 import { isAuthenticated } from './utils/auth'
 
@@ -22,6 +22,10 @@ const links = [
   { to: '/chat', label: '智能咨询' },
   { to: '/compare', label: '款式对比' },
   { to: '/coupon', label: '领券指引' },
+  // v0.6 新增功能：内容未开发，tab 先用占位图标
+  { to: '/wishlist', label: '心愿单', icon: PhHeart },
+  { to: '/items', label: '物品库', icon: PhPackage },
+  { to: '/spending', label: '消费记录', icon: PhChartPie },
 ]
 </script>
 
@@ -62,6 +66,7 @@ const links = [
                 : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
             "
           >
+            <component :is="l.icon" v-if="l.icon" :size="15" class="mr-1.5 inline -mt-0.5" />
             {{ l.label }}
           </RouterLink>
           <RouterLink
