@@ -130,7 +130,7 @@ npm run build    # 产物 dist/
 | M0 开发基座 | 后端骨架、配置 / trace_id / CI | 🔵 进行中（已完成后端骨架与注册登录模块） |
 | M1 后端核心链路 | FastAPI + LangGraph 五 Agent + Mock | ⬜ 未开始 |
 | M2 契约与画像 | JSON Schema 契约 + A0 画像 Agent | ⬜ 未开始 |
-| M3 数据与 RAG | MySQL + Milvus + Redis 缓存 | ⬜ 未开始（业务库与迁移已就绪） |
+| M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis 缓存 | ⬜ 未开始（业务库与迁移已就绪） |
 | M4 前端联调 | frontend-web 接后端 | ⬜ 未开始（已配 `/auth` 代理） |
 | M5 真实联盟 API | 多多进宝 → 淘宝 → 京东 | ⬜ 未开始（当前 Mock） |
 | M6 安全合规加固 | 沙箱、限流、隐私 | ⬜ 未开始 |

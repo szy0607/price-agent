@@ -55,4 +55,4 @@ frontend/
 
 - FastAPI + LangGraph 多 Agent 编排（A1 路由 / A2 商品情报 / A3 价格情报 / A4 款式对比 / A5 推荐引导）
 - 联盟查券 API 适配层：淘宝联盟 / 京东联盟 / 多多进宝 + Mock 数据源
-- PostgreSQL + pgvector（RAG）与 Redis 缓存
+- MySQL（业务）+ PostgreSQL/pgvector（RAG 知识库）与 Redis 缓存

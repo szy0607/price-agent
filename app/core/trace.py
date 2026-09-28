@@ -1,5 +1,6 @@
 #请求级trace_id的存放与使用
 import contextvars
+TRACE_HEADER = "X-Trace-Id"
 _trace_id : contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id",default=None)
 
 

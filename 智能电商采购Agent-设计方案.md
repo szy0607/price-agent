@@ -214,7 +214,11 @@ get_coupon_info(item_id)         → 券类型 / 面额 / 使用限制 / 领券�
 | 价格测算 | 活动价计算 | 平台活动规则 | **硬约束**（算错会误导） |
 | 领券指引 | 生成步骤 | 券类型与领券路径 | **硬约束**（说错用户领不到） |
 
-**技术栈**：pgvector 起步（与 PostgreSQL 一套），数据量大后上 Milvus。
+**技术栈**：**PostgreSQL 16 + pgvector**。知识库独立于业务库 MySQL，但**原文与向量在同一个库里**——知识原文、切片、embedding、时效与过滤字段全在 PG，检索**一条 SQL 直接返回原文，不需要回表**。
+
+> **2026-09-27 修订（大宋拍板）**：业务库 = **MySQL 8**（用户侧数据）；知识 / 向量库 = **PostgreSQL 16 + pgvector**。
+> 演变过程：`PostgreSQL + pgvector`（最早，业务库也用 PG）→ `MySQL + Milvus`（业务库改 MySQL 后）→ **`MySQL + PostgreSQL/pgvector`（现行）**。
+> **换掉 Milvus 的依据**（知识只有千条级、少 3 个容器、同库同事务、原生 SQL 过滤）见 `docs/用户注册与登录-接口契约.md` **§8.2 第 6 条**；完整规格（表结构 / 检索 SQL / 灌库 / 迁移 / M3 排期）见 **§8**。
 
 ### 3.7 推荐商品（无目标商品场景，v0.5 新增）
 
@@ -286,7 +290,7 @@ flowchart LR
 | Agent 编排 | LangGraph | 状态图驱动 |
 | LLM 接口 | OpenAI / Anthropic function calling | 工具调用为标准能力 |
 | 业务数据库 | MySQL | 对话/画像/推荐等结构化业务数据 |
-| 向量数据库 | Milvus | RAG 向量检索（活动规则/券知识/规格库）；替代原 PG + pgvector |
+| 知识 / 向量数据库 | **PostgreSQL 16 + pgvector** | RAG 检索（活动规则/券知识/规格库）；承载**知识原文 + 切片 + embedding 一体**，与业务库 MySQL 分立；替代 Milvus |
 | 缓存 | Redis | 券信息缓存、会话状态 |
 | 沙箱 | 进程级（起步）→ Docker（可选） | 信息采集隔离 |
 | 审计 | 结构化日志 + trace_id | 全链路可回放 |
@@ -309,7 +313,7 @@ flowchart LR
 | 8 | 优惠信息获取边界 | 商品属性型优惠走联盟 API；账号/流量型权益走 RAG 规则指引；**不引入评论区爬虫** |
 | 9 | Demo 范围 | 全品类（通用全品类 Mock） |
 | 10 | 对话方式 | 文字 + 链接 + 图片输入（图片输入属模型多模态能力，由所选 LLM 决定） |
-| 11 | 数据库选型 | 业务库 MySQL + 向量库 Milvus（替代原 PG + pgvector） |
+| 11 | 数据库选型 | **业务库 MySQL 8**（用户侧数据）+ **知识/向量库 PostgreSQL 16 + pgvector**（原文与向量同库）。2026-09-27 更新，替代原 `PG + pgvector` 与中途的 `MySQL + Milvus`，依据见契约 §8.2 |
 | 12 | 推荐商品功能 | 纳入核心流程：无目标商品场景从 `search_product` 起步，按画像+预算+价格打分输出 Top N 推荐卡片（默认 Top 3），与款式对比流程并列且可衔接 |
 
 ### 待决事项（⏳）

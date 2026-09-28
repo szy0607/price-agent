@@ -4,6 +4,9 @@ from fastapi import FastAPI,Request
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.core.trace import TRACE_HEADER, set_trace_id
+
 logger = logging.getLogger(__name__)
 class ErrorCode:
     PARAM_INVALID = 40001#参数无效验失败
@@ -23,6 +26,15 @@ CODE_HTTP_STATUS : dict[int,int] = {
     42901:429,
     50000:500,
 }
+
+_HTTP_TO_CODE: dict[int, int] = {
+    400: ErrorCode.PARAM_INVALID,
+    401: ErrorCode.SESSION_INVALID,
+    403: ErrorCode.SESSION_INVALID,
+    404: ErrorCode.PARAM_INVALID,
+    405: ErrorCode.PARAM_INVALID,
+    429: ErrorCode.RATE_LIMITED,
+}
 class BizError(Exception):
     def __init__(self, code: int, msg: str) -> None:
         if code not in CODE_HTTP_STATUS:
@@ -35,10 +47,11 @@ class BizError(Exception):
 def success(data=None) -> dict:
     return {"code":0,"msg":"success","data":data}
 
-def envelope(code:int,msg:str,http_status:int,data=None) -> JSONResponse:
+def envelope(code:int,msg:str,http_status:int,data=None,headers:dict|None = None) -> JSONResponse:
     return JSONResponse(
         status_code=http_status,
         content={"code":code,"msg":msg,"data":data},
+        headers = headers,
     )
 
 def register_exception_handlers(app : FastAPI):
@@ -58,9 +71,12 @@ def register_exception_handlers(app : FastAPI):
 
     @app.exception_handler(StarletteHTTPException)
     async def _h_http(request:Request,exc:StarletteHTTPException)->JSONResponse:
-        code = ErrorCode.INTERNAL if exc.status_code == 500 else exc.status_code * 100 + 1
+        code = _HTTP_TO_CODE.get(exc.status_code,ErrorCode.INTERNAL)
         return envelope(code,exc.detail,exc.status_code)
     @app.exception_handler(Exception)
     async def _h_exc(request:Request,exc:Exception)->JSONResponse:
+        trace_id = getattr(request.state,"trace_id",None)
+        if trace_id:
+            set_trace_id(trace_id)
         logger.exception("未处理异常 %s %s",request.method,request.url.path)
-        return envelope(ErrorCode.INTERNAL,"内部服务器错误",500)
+        return envelope(ErrorCode.INTERNAL,"内部服务器错误",500,headers={TRACE_HEADER:trace_id} if trace_id else {})
