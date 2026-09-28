@@ -3,9 +3,9 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhArrowsLeftRight, PhChatCircleDots, PhCheckCircle, PhEye, PhEyeSlash, PhLightning, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { loginUser, registerUser } from '../utils/api'
+import { getCurrentUser, loginUser, registerUser } from '../utils/api'
 import { bestPlat, cheapest, PLATFORMS, PLAT_KEYS, products } from '../mock/data'
-import { setAuthEmail } from '../utils/auth'
+import { setAuthUser } from '../utils/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -75,7 +75,7 @@ async function submit() {
       successMessage.value = '注册成功，请使用新账号登录'
     } else {
       await loginUser({ user_email: email, password })
-      setAuthEmail(email)
+      setAuthUser(await getCurrentUser())
       successMessage.value = '登录成功'
       setTimeout(() => router.push(route.query.redirect || '/chat'), 450)
     }

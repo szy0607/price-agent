@@ -5,14 +5,22 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, ''
  * Keeping the envelope handling here prevents views from depending on transport details.
  */
 export async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  })
+  const { headers: customHeaders = {}, ...requestOptions } = options
+  const method = (options.method || 'GET').toUpperCase()
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...requestOptions,
+      credentials: 'include',
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(method !== 'GET' ? { 'X-Requested-With': 'price-agent' } : {}),
+        ...customHeaders,
+      },
+    })
+  } catch {
+    throw new Error('无法连接服务器')
+  }
 
   let payload = null
   try {
@@ -43,4 +51,27 @@ export function loginUser({ user_email, password }) {
     method: 'POST',
     body: JSON.stringify({ user_email, password }),
   })
+}
+
+export function getCurrentUser() {
+  return apiRequest('/auth/me')
+}
+
+export function logoutUser() {
+  return apiRequest('/auth/logout', { method: 'POST' })
+}
+
+export function listApiKeys() {
+  return apiRequest('/settings/api-keys')
+}
+
+export function saveApiKey(provider, apiKey) {
+  return apiRequest(`/settings/api-keys/${encodeURIComponent(provider)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ api_key: apiKey }),
+  })
+}
+
+export function deleteApiKey(provider) {
+  return apiRequest(`/settings/api-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' })
 }

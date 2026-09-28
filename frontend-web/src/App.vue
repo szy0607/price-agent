@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { PhLightning } from '@phosphor-icons/vue'
+import { PhArrowsLeftRight, PhChatCircleDots, PhGearSix, PhLightning, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
-import { isAuthenticated } from './utils/auth'
+import { isAuthenticated, refreshAuth } from './utils/auth'
 
 const route = useRoute()
 const authenticated = ref(isAuthenticated())
@@ -11,17 +11,17 @@ const showFunctionalNav = computed(() => route.name !== 'auth' && authenticated.
 const isAuthPage = computed(() => route.name === 'auth')
 const syncAuth = () => { authenticated.value = isAuthenticated() }
 onMounted(() => {
-  window.addEventListener('storage', syncAuth)
   window.addEventListener('price-agent-auth-changed', syncAuth)
+  refreshAuth()
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('storage', syncAuth)
   window.removeEventListener('price-agent-auth-changed', syncAuth)
 })
 const links = [
-  { to: '/chat', label: '智能咨询' },
-  { to: '/compare', label: '款式对比' },
-  { to: '/coupon', label: '领券指引' },
+  { to: '/chat', label: '智能咨询', icon: PhChatCircleDots },
+  { to: '/compare', label: '款式对比', icon: PhArrowsLeftRight },
+  { to: '/coupon', label: '领券指引', icon: PhTag },
+  { to: '/settings', label: '设置', icon: PhGearSix },
 ]
 </script>
 
@@ -55,14 +55,17 @@ const links = [
             v-for="l in links"
             :key="l.to"
             :to="l.to"
-            class="shrink-0 rounded-[10px] px-2.5 py-2 text-sm transition-colors sm:px-3.5"
+            :title="l.label"
+            :aria-label="l.label"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-[10px] px-2 text-sm transition-colors sm:h-auto sm:min-w-0 sm:px-3.5 sm:py-2"
             :class="
               route.path === l.to
                 ? 'bg-accent-soft font-medium text-accent-strong dark:bg-accent/15 dark:text-blue-300'
                 : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
             "
           >
-            {{ l.label }}
+            <component :is="l.icon" class="sm:hidden" :size="18" />
+            <span class="hidden sm:inline">{{ l.label }}</span>
           </RouterLink>
           <RouterLink
             to="/chat"

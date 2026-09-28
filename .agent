@@ -83,3 +83,16 @@ npm run build    # 产物 dist/，任意静态服务器可托管
 - 环境坑：直连 github.com 443 超时，git 需走系统代理 http://127.0.0.1:7890；github API 匿名限流；bu 浏览器访问 github.io 有缓存需 ?v= 绕过。
 - 本地 F:\price-agent 仍非 git 仓库（用户此前用网页上传）；如需本地 git 管理：cd F:\price-agent; git init; git remote add origin https://github.com/szy0607/price-agent.git; git fetch; git checkout -B main origin/main。
 - 待决：A0 User Profile Agent 后端化（前端 utils/profile.js 字段已定义）；frontend-web 转正冻结（已完成倾向）；Demo Mock 数据源 → 联盟 API 实接。
+
+## 2026-09-28：用户自带第三方 API Key 加密存储
+
+- 新增 AES-256-GCM 信封加密、每用户独立 DEK、环境变量 KEK 密钥环，以及内部保存、取用、失效标记、删除和轮换服务。
+- 新增两表的 Alembic 迁移、轮换命令、配置与操作文档。现有 `.env.example` 删除和 `.env.exemple` 新增是工作区原有改动，未覆盖。
+- 2026-09-29 在本机 MySQL 执行迁移并验证 `alembic current` 与唯一 `head` 均为 `c3d5e7f9a1b2`；加密和 MySQL 集成测试合计 10 项通过。
+
+## 2026-09-28：账号与 API Key 设置页
+
+- 新增服务端 `user_sessions` 模型和后续迁移，登录写 Session Cookie，提供 `/auth/me` 与登出；设置接口按会话用户列出、保存、替换、删除第三方 Key。
+- 网页新增 `/settings`，展示账号信息、脱敏 Key 列表及编辑/删除操作；路由守卫改为向服务端确认登录状态，不再凭本地邮箱标记放行。
+- 前端构建、Python 语法检查及包含会话隔离的 MySQL/HTTP 集成测试已通过。`pytest-asyncio` 测试统一使用模块级事件循环，避免连接池跨事件循环复用。
+- 本机 `.env` 尚未设置 `API_KEY_KEKS` 和 `API_KEY_ACTIVE_KEK_VERSION`；启用设置页的密钥操作前，需按 `docs/第三方API-Key加密存储.md` 配置并妥善备份 KEK。前端静态托管部署需要同源后端入口。
