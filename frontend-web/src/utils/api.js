@@ -38,9 +38,13 @@ export function registerUser({ user_email, username, password }) {
   })
 }
 
-export function loginUser({ user_email, password }) {
+export function getCaptcha() {
+  return apiRequest('/auth/captcha')
+}
+
+export function loginUser({ user_email, password, captcha_token, captcha_code }) {
   return apiRequest('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ user_email, password }),
+    body: JSON.stringify({ user_email, password, captcha_token, captcha_code }),
   })
 }

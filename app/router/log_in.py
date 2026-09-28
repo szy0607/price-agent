@@ -5,6 +5,7 @@ from app.models import User
 from app.repository.auth_repo import user_create, user_last_login_time
 from app.core.errors import success, BizError, ErrorCode
 from app.core.security import check_password, check_password_strength, hash_password
+from app.core.captcha import create_captcha, verify_captcha
 from app.dependence import get_db_session
 from app.repository.auth_repo import get_pw_hash,user_exists
 from app.schemas.user_sche import UserLogin, UserRegister
@@ -13,9 +14,17 @@ auth_router = APIRouter(
     prefix="/auth",
     tags=["auth"]
 )
+#图形验证码：下发签名串 + 图片（自研无状态图形码，见契约 §2.5；不写库、不依赖 Redis）
+@auth_router.get("/captcha")
+async def get_captcha():
+    captcha_token, image_base64 = create_captcha()
+    return success({"captcha_token": captcha_token, "image_base64": image_base64})
+
 #登录
 @auth_router.post("/login")
 async def login(pay_load:UserLogin,session:AsyncSession = Depends(get_db_session)):
+    # ① 验证码必须在任何数据库操作之前（契约 §2.2：顺序即安全边界）
+    verify_captcha(pay_load.captcha_token, pay_load.captcha_code)
     user_email = pay_load.user_email.lower().strip()
     pw_hash = await get_pw_hash(user_email,session)
     if not check_password(pay_load.password,pw_hash):

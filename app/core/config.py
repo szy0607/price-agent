@@ -9,4 +9,5 @@ class Settings(BaseSettings):
     db_url : str
     pw_max_length : int
     pw_min_length : int
+    captcha_key : str
 settings = Settings()

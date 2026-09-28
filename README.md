@@ -34,7 +34,7 @@ price-agent/
 ├── alembic/                    # 数据库迁移（versions/ 含 users 表迁移）
 ├── docs/                       # 接口契约与设计文档（登录契约、trace_id 基座等）
 ├── .github/workflows/deploy.yml # GitHub Pages 自动部署
-├── 智能电商采购Agent-设计方案.md  # 设计方案（v0.5）
+├── 智能电商采购Agent-设计方案.md  # 设计方案（v0.6）
 ├── 开发流程.md                   # 开发流程与合规红线（v1.0）
 ├── requirements.txt             # 后端运行依赖
 └── requirements-dev.txt         # 后端开发 / 测试依赖
@@ -47,7 +47,7 @@ price-agent/
 | 网页版前端 | Vue 3.5 + Vite 5 + Tailwind 4 + Phosphor Icons + Vue Router 4 |
 | 移动版 Demo | Vue 3 + Vite 5 + Vant 4 |
 | 后端 | Python 3.10 + FastAPI + 异步 SQLAlchemy 2.0 + Pydantic v2 |
-| 数据库 | MySQL 8（业务库）+ Redis（缓存 / 验证码） |
+| 数据库 | MySQL 8（业务事实源）+ PostgreSQL 16/pgvector（M3 知识库）+ Redis（M3/M6 起的缓存与临时状态） |
 | 迁移 | Alembic（异步） |
 | 部署 | GitHub Actions → GitHub Pages |
 
@@ -91,8 +91,8 @@ npm run build    # 产物 dist/
 | 变量 | 说明 | 示例 |
 |------|------|------|
 | `DB_URL` | 异步 MySQL 连接串 | `mysql+aiomysql://user:password@127.0.0.1:3306/price_agent?charset=utf8mb4` |
-| `PW_MIN_LENGTH` | 密码最小长度 | `8` |
-| `PW_MAX_LENGTH` | 密码最大长度 | `64` |
+| `PW_MIN_LENGTH` | 密码最小长度 | `6` |
+| `PW_MAX_LENGTH` | 密码最大长度 | `18` |
 
 > `.env` 已加入 `.gitignore`，请勿提交真实凭据。
 
@@ -115,22 +115,24 @@ npm run build    # 产物 dist/
 
 | 文档 | 说明 |
 |------|------|
-| `智能电商采购Agent-设计方案.md` | 设计方案底稿（v0.5）：多 Agent 架构、统一适配层、双价策略、合规红线 |
+| `智能电商采购Agent-设计方案.md` | 设计方案底稿（v0.6）：多 Agent 架构、统一适配层、双价策略、合规红线 |
 | `开发流程.md` | 开发流程规范（v1.0）：里程碑、数据契约、git 规范、合规自查清单 |
 | `docs/用户注册与登录-接口契约.md` | 注册登录接口契约 |
 | `docs/登录人机验证与登录态-设计.md` | 人机验证与登录态设计 |
 | `docs/M0-基座-trace_id中间件与健康检查-设计.md` | M0 基座（trace_id、健康检查）设计 |
 | `docs/代码审查-异步连接与Session规范.md` | 异步连接与 Session 规范审查 |
-| `docs/注册登录-实现指引.md` | 注册登录实现指引 |
+| `docs/注册登录-实现指引.md` | 注册登录实现指引（施工手册：按什么顺序动手、每步为什么） |
+| `docs/参考-Yuxi存储层搭配与可借鉴清单.md` | 参考项目 `F:\Yuxi` 存储层调研（可用 9 / 有条件 4 / 不可搬 7） |
+| `docs/架构契约审查-待商定.md` | 组件启用时机与数据归属（Redis 分阶段、双库边界、缓存语义） |
 
 ## 当前进度与路线图
 
 | 里程碑 | 目标 | 状态 |
 |--------|------|------|
-| M0 开发基座 | 后端骨架、配置 / trace_id / CI | 🔵 进行中（已完成后端骨架与注册登录模块） |
+| M0 开发基座 | 后端骨架、配置 / trace_id / CI | 🔵 进行中（骨架 / 配置 / trace_id 中间件 / `/health` / 统一错误处理 / 日志 / 注册登录已落地；Cookie 会话进行中） |
 | M1 后端核心链路 | FastAPI + LangGraph 五 Agent + Mock | ⬜ 未开始 |
 | M2 契约与画像 | JSON Schema 契约 + A0 画像 Agent | ⬜ 未开始 |
-| M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis 缓存 | ⬜ 未开始（业务库与迁移已就绪） |
+| M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis（联盟 API 缓存、对话最近消息热缓存） | ⬜ 未开始（业务库与迁移已就绪） |
 | M4 前端联调 | frontend-web 接后端 | ⬜ 未开始（已配 `/auth` 代理） |
 | M5 真实联盟 API | 多多进宝 → 淘宝 → 京东 | ⬜ 未开始（当前 Mock） |
 | M6 安全合规加固 | 沙箱、限流、隐私 | ⬜ 未开始 |
