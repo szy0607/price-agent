@@ -1,4 +1,7 @@
+import hashlib
 import re
+import secrets
+
 import bcrypt
 from app.core.config import settings
 from app.core.errors import ErrorCode, BizError
@@ -27,3 +30,8 @@ def check_password_strength(raw_password:str)->bool:
     if not _has_letter.search(raw_password) or not _has_digit.search(raw_password):
         raise BizError(ErrorCode.PARAM_INVALID,"密码必须包含字母且数字")
     return True
+def new_session_token() ->tuple[str,str]:
+    token = secrets.token_urlsafe(32)
+    return token,hashlib.sha256(token.encode()).hexdigest()
+def hash_session_token(token:str)->str:
+    return hashlib.sha256(token.encode()).hexdigest()

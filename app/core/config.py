@@ -10,4 +10,5 @@ class Settings(BaseSettings):
     pw_max_length : int
     pw_min_length : int
     captcha_key : str
+    cookie_secure : bool = False
 settings = Settings()
