@@ -30,15 +30,15 @@ class ModelProviderInput(BaseModel):
 def _service() -> ApiKeyService:
     try:
         return ApiKeyService(async_session_local, KeyRing.from_settings(settings))
-    except KeyConfigurationError:
-        raise BizError(ErrorCode.INTERNAL, "内部服务器错误") from None
+    except KeyConfigurationError as exc:
+        raise BizError(ErrorCode.INTERNAL, "内部服务器错误") from exc
 
 
 def _provider(raw: str) -> str:
     try:
         return normalize_provider(raw)
-    except ValueError:
-        raise BizError(ErrorCode.PARAM_INVALID, "服务商标识无效") from None
+    except ValueError as exc:
+        raise BizError(ErrorCode.PARAM_INVALID, "服务商标识无效") from exc
 
 
 def _metadata(row) -> dict:

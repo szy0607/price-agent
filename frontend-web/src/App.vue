@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { PhArrowsLeftRight, PhChartPie, PhChatCircleDots, PhGearSix, PhHeart, PhLightning, PhPackage, PhTag } from '@phosphor-icons/vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { PhArrowsLeftRight, PhChartPie, PhChatCircleDots, PhGearSix, PhHeart, PhLightning, PhPackage, PhSignOut, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
-import { isAuthenticated, refreshAuth } from './utils/auth'
+import { isAuthenticated, refreshAuth, signOut as logoutCurrentUser } from './utils/auth'
 
 const route = useRoute()
+const router = useRouter()
 const authenticated = ref(isAuthenticated())
+const signingOut = ref(false)
 const showFunctionalNav = computed(() => route.name !== 'auth' && authenticated.value)
 const isAuthPage = computed(() => route.name === 'auth')
 const syncAuth = () => { authenticated.value = isAuthenticated() }
@@ -27,6 +29,19 @@ const links = [
   { to: '/spending', label: '消费记录', icon: PhChartPie },
   { to: '/settings', label: '设置', icon: PhGearSix },
 ]
+
+async function handleSignOut() {
+  if (signingOut.value) return
+  signingOut.value = true
+  try {
+    await logoutCurrentUser()
+  } catch {
+    // signOut 会在请求失败时也清理本地状态。
+  } finally {
+    signingOut.value = false
+    await router.replace('/auth')
+  }
+}
 </script>
 
 <template>
@@ -78,6 +93,16 @@ const links = [
             <PhLightning :size="15" weight="bold" />
             <span class="max-[430px]:hidden">开始咨询</span>
           </RouterLink>
+          <button
+            type="button"
+            title="退出登录"
+            aria-label="退出登录"
+            :disabled="signingOut"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-[10px] text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+            @click="handleSignOut"
+          >
+            <PhSignOut :size="18" />
+          </button>
         </div>
         <RouterLink
           v-else-if="!isAuthPage"

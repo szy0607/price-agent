@@ -3,13 +3,12 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   PhArrowClockwise, PhCheckCircle, PhEye, PhEyeSlash, PhFloppyDisk,
-  PhKey, PhPencilSimple, PhPlus, PhSignOut, PhTrash, PhWarningCircle, PhX,
+  PhKey, PhPencilSimple, PhPlus, PhTrash, PhWarningCircle, PhX,
 } from '@phosphor-icons/vue'
-import { deleteApiKey, getModelSetting, listApiKeys, logoutUser, saveApiKey, setModelSetting } from '../utils/api'
-import { clearAuth, getAuthUser } from '../utils/auth'
+import { deleteApiKey, getModelSetting, listApiKeys, saveApiKey, setModelSetting } from '../utils/api'
+import { clearAuth } from '../utils/auth'
 
 const router = useRouter()
-const user = ref(getAuthUser())
 const keys = ref([])
 const modelSetting = ref({ provider: null, options: [] })
 const selectedModelProvider = ref('')
@@ -28,7 +27,6 @@ const keyInput = ref(null)
 const confirmTarget = ref(null)
 const deleteDialog = ref(null)
 const deleting = ref(false)
-const signingOut = ref(false)
 
 const providers = [
   { value: 'openai', label: 'OpenAI' },
@@ -154,20 +152,6 @@ async function openDelete(item) {
   deleteDialog.value?.focus()
 }
 
-async function signOut() {
-  signingOut.value = true
-  pageError.value = ''
-  try {
-    await logoutUser()
-    clearAuth()
-    await router.replace('/auth')
-  } catch (error) {
-    pageError.value = error.message || '退出失败'
-  } finally {
-    signingOut.value = false
-  }
-}
-
 onMounted(loadKeys)
 </script>
 
@@ -186,22 +170,7 @@ onMounted(loadKeys)
         <PhCheckCircle :size="18" />{{ feedback }}
       </p>
 
-      <section class="grid gap-5 border-b border-zinc-200 pb-9 dark:border-zinc-800 sm:grid-cols-[180px_minmax(0,1fr)]">
-        <div>
-          <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">账号</h2>
-        </div>
-        <div class="flex flex-wrap items-center justify-between gap-5">
-          <div class="min-w-0">
-            <p class="font-medium text-zinc-900 dark:text-white">{{ user?.username || '当前用户' }}</p>
-            <p class="mt-1 break-all text-sm text-zinc-500 dark:text-zinc-400">{{ user?.user_email }}</p>
-          </div>
-          <button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" :disabled="signingOut" @click="signOut">
-            <PhSignOut :size="17" />退出登录
-          </button>
-        </div>
-      </section>
-
-      <section class="grid gap-5 py-9 sm:grid-cols-[180px_minmax(0,1fr)]">
+      <section class="grid gap-5 border-t border-zinc-200 py-9 dark:border-zinc-800 sm:grid-cols-[180px_minmax(0,1fr)]">
         <div>
           <h2 class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"><PhKey :size="18" />API Key</h2>
         </div>

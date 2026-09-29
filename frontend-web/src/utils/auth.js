@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { getCurrentUser } from './api'
+import { getCurrentUser, logoutUser } from './api'
 
 const currentUser = ref(null)
 let pending = null
@@ -33,6 +33,14 @@ export function clearAuth() {
   verifiedAt = 0
   if (typeof window !== 'undefined') window.localStorage.removeItem('price-agent-auth-email')
   notify()
+}
+
+export async function signOut() {
+  try {
+    await logoutUser()
+  } finally {
+    clearAuth()
+  }
 }
 
 export async function refreshAuth({ force = false } = {}) {

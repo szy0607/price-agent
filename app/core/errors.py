@@ -57,6 +57,10 @@ def envelope(code:int,msg:str,http_status:int,data=None,headers:dict|None = None
 def register_exception_handlers(app : FastAPI):
     @app.exception_handler(BizError)
     async def _h_biz(request:Request,exc:BizError)->JSONResponse:
+        if exc.http_status>=500:
+            logger.error(                "业务异常 %s %s code=%s msg=%s",
+                request.method, request.url.path, exc.code, exc.msg,
+)
         return envelope(exc.code,exc.msg,exc.http_status)
 
     @app.exception_handler(RequestValidationError)
