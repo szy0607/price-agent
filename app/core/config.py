@@ -15,4 +15,5 @@ class Settings(BaseSettings):
     api_key_active_kek_version: str | None = None
     cookie_secure: bool = False
     captcha_key : str
+    cookie_secure : bool = False
 settings = Settings()
