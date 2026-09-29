@@ -75,3 +75,21 @@ export function saveApiKey(provider, apiKey) {
 export function deleteApiKey(provider) {
   return apiRequest(`/settings/api-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' })
 }
+
+export function getModelSetting() {
+  return apiRequest('/settings/model')
+}
+
+export function setModelSetting(provider) {
+  return apiRequest('/settings/model', {
+    method: 'PUT',
+    body: JSON.stringify({ provider }),
+  })
+}
+
+export function sendChatMessage(messages) {
+  return apiRequest('/chat/message', {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  })
+}

@@ -5,12 +5,15 @@ import {
   PhArrowClockwise, PhCheckCircle, PhEye, PhEyeSlash, PhFloppyDisk,
   PhKey, PhPencilSimple, PhPlus, PhSignOut, PhTrash, PhWarningCircle, PhX,
 } from '@phosphor-icons/vue'
-import { deleteApiKey, listApiKeys, logoutUser, saveApiKey } from '../utils/api'
+import { deleteApiKey, getModelSetting, listApiKeys, logoutUser, saveApiKey, setModelSetting } from '../utils/api'
 import { clearAuth, getAuthUser } from '../utils/auth'
 
 const router = useRouter()
 const user = ref(getAuthUser())
 const keys = ref([])
+const modelSetting = ref({ provider: null, options: [] })
+const selectedModelProvider = ref('')
+const selectingModel = ref(false)
 const loading = ref(true)
 const pageError = ref('')
 const feedback = ref('')
@@ -52,7 +55,10 @@ async function loadKeys() {
   pageError.value = ''
   keys.value = []
   try {
-    keys.value = await listApiKeys()
+    const [savedKeys, setting] = await Promise.all([listApiKeys(), getModelSetting()])
+    keys.value = savedKeys
+    modelSetting.value = setting
+    selectedModelProvider.value = setting.provider || ''
   } catch (error) {
     if (error.status === 401) {
       clearAuth()
@@ -62,6 +68,22 @@ async function loadKeys() {
     pageError.value = error.status === 500 ? '密钥服务暂不可用' : (error.message || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function selectModel() {
+  if (!selectedModelProvider.value) return
+  selectingModel.value = true
+  pageError.value = ''
+  feedback.value = ''
+  try {
+    await setModelSetting(selectedModelProvider.value)
+    modelSetting.value.provider = selectedModelProvider.value
+    feedback.value = '咨询模型已更新'
+  } catch (error) {
+    pageError.value = error.message || '切换模型失败'
+  } finally {
+    selectingModel.value = false
   }
 }
 
@@ -208,6 +230,20 @@ onMounted(loadKeys)
               <button type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-400/10 dark:hover:text-red-300" :title="`移除 ${providerLabel(item.provider)}`" :aria-label="`移除 ${providerLabel(item.provider)}`" @click="openDelete(item)"><PhTrash :size="18" /></button>
             </div>
           </div>
+
+          <form v-if="modelSetting.options.length" class="mt-7 border-b border-zinc-200 pb-7 dark:border-zinc-800" @submit.prevent="selectModel">
+            <h3 class="text-base font-semibold text-zinc-900 dark:text-white">咨询使用的模型</h3>
+            <div class="mt-3 flex flex-wrap items-end gap-3">
+              <label class="min-w-48 flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                服务商与模型
+                <select v-model="selectedModelProvider" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white">
+                  <option value="" disabled>选择已保存的服务商</option>
+                  <option v-for="item in modelSetting.options" :key="item.provider" :value="item.provider" :disabled="!keys.some((key) => key.provider === item.provider && key.status === 'active')">{{ item.label }} · {{ item.model }}</option>
+                </select>
+              </label>
+              <button type="submit" :disabled="!selectedModelProvider || selectingModel || selectedModelProvider === modelSetting.provider" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"><PhCheckCircle :size="17" />设为默认</button>
+            </div>
+          </form>
 
           <form class="mt-9 border-t border-zinc-200 pt-7 dark:border-zinc-800" @submit.prevent="save">
             <div class="mb-5 flex items-center justify-between gap-3">

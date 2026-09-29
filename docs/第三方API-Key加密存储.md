@@ -28,6 +28,14 @@ COOKIE_SECURE=false
 
 三条接口都依赖有效 Session Cookie，写入还要求 `X-Requested-With: price-agent`。所有者 ID 来自会话，不接收客户端提供的用户 ID。响应使用现有 `{code,msg,data}` 信封，不返回完整 Key。设置页可查看账号、保存/替换/移除 Key 与退出登录；当前没有第三方连接测试能力，状态仅表示本地保存情况。
 
+## 使用用户自己的模型 API
+
+保存 Key 后，在设置页“咨询使用的模型”选择一个已保存的服务商。选择结果存于 `users.model_provider`；删除正在使用的 Key 会清除选择。当前支持 OpenAI (`gpt-4o-mini`)、Anthropic (`claude-haiku-4-5`)、DeepSeek (`deepseek-chat`) 和通义千问 (`qwen-plus`)。其他服务商的 Key 仍可加密保存，但没有聊天适配器，不能选为咨询模型。
+
+浏览器向 `POST /chat/message` 提交最近最多 12 条文本消息；后端根据 Session 确认用户，只解密该用户选定服务商的 Key，在固定官方 HTTPS 端点调用模型，并只将回复文本返回浏览器。浏览器从不接收 Key。服务商返回 401/403 时，后端用调用前的修订标识将该 Key 标为 `invalid`；替换 Key 后可重新选择。没有选择、Key 缺失或配置错误时明确报错，不回退到前端 Mock 回复。聊天目前仅支持文本，图片、商品搜索、实时价格、库存和优惠券接口尚未接入；模型系统提示禁止声称已查询这些数据。
+
+新增迁移 `e4a6b8c0d2f1` 为 `users` 增加可空的默认服务商字段。部署时先执行 `alembic upgrade head`，再重启后端。必须先配置本页上方的 KEK 环境变量；用户自己的模型 Key 不能代替服务端 KEK。正式部署还需让 `/auth`、`/settings`、`/chat` 与前端保持同源。
+
 ## 内部调用
 
 ```python
@@ -68,4 +76,4 @@ KEK 命令按用户事务重包装 DEK，可重复运行；输出尚未采用目
 
 `python -m unittest discover -s tests -p test_api_key_crypto.py -v` 验证密码学边界。迁移后的可清理本机 MySQL 上设置 `RUN_MYSQL_KEY_TESTS=1`，再运行 `pytest tests/test_api_key_service.py -v`；测试会创建并删除自己的随机用户及会话。覆盖首次并发写入、保存与轮换并发、失效状态、解密、篡改、事务回滚和设置接口的登录隔离。前端运行 `npm run build`。执行前确认该库允许创建和删除测试用户。
 
-2026-09-29 本机验证：加密和 MySQL/HTTP 集成测试共 10 项通过，`npm run build` 通过；`alembic current` 与唯一的 `alembic heads` 均为 `c3d5e7f9a1b2`。本机 `.env` 尚未设置 KEK，因此浏览器中的实际 Key 保存仍需完成上述配置后使用。
+2026-09-29 本机验证：加密和 MySQL/HTTP 集成测试共 11 项通过，含用户密钥隔离和两种上游协议的模拟响应；`npm run build` 通过；`alembic current` 与唯一的 `alembic heads` 均为 `e4a6b8c0d2f1`。未向真实模型服务商发起收费请求。本机 `.env` 尚未设置 KEK，因此浏览器中的实际 Key 保存仍需完成上述配置后使用。

@@ -175,6 +175,9 @@ class ApiKeyService:
                     deleted = key is not None
                     if key is not None:
                         await db.delete(key)
+                        owner = await db.get(User, user_id)
+                        if owner.model_provider == provider:
+                            owner.model_provider = None
             self._audit("delete", actor, user_id, provider, "success" if deleted else "noop")
             return deleted
         except Exception as exc:

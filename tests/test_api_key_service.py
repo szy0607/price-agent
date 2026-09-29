@@ -8,6 +8,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+import httpx
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy import delete, select
@@ -19,6 +20,7 @@ from app.database.session import async_engine, async_session_local
 from app.main import app
 from app.models import User, UserApiKey, UserKeyEnvelope, UserSession
 from app.services.api_key_service import ApiKeyService, KeyRecordError
+from app.services import chat_service
 
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -226,3 +228,72 @@ async def test_settings_http_requires_session_and_keeps_users_separate(user_ids,
         response = await first.post("/auth/logout", headers={"X-Requested-With": "price-agent"})
         assert response.status_code == 200
         assert (await first.get("/settings/api-keys")).status_code == 401
+
+
+async def test_chat_uses_only_selected_users_key(user_ids, monkeypatch):
+    monkeypatch.setattr(settings, "api_key_keks", SecretStr('{"v1":"' + base64.b64encode(b"1" * 32).decode() + '"}'))
+    monkeypatch.setattr(settings, "api_key_active_kek_version", "v1")
+    password = "testPassword123"
+    async with async_session_local() as db:
+        async with db.begin():
+            users = (await db.scalars(select(User).where(User.id.in_(user_ids)))).all()
+            emails = {user.id: user.user_email for user in users}
+            for user in users:
+                user.password_hash = hash_password(password)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as first, AsyncClient(transport=transport, base_url="http://testserver") as second:
+        assert (await first.post("/chat/message", json={"messages": [{"role": "user", "content": "hello"}]}, headers={"X-Requested-With": "price-agent"})).status_code == 401
+        for client, user_id in ((first, user_ids[0]), (second, user_ids[1])):
+            response = await client.post("/auth/login", json={"user_email": emails[user_id], "password": password})
+            assert response.status_code == 200
+        for client, key in ((first, "sk-test-first-aaaa"), (second, "sk-test-second-bbbb")):
+            response = await client.put("/settings/api-keys/openai", json={"api_key": key}, headers={"X-Requested-With": "price-agent"})
+            assert response.status_code == 200
+
+        assert (await first.post("/chat/message", json={"messages": [{"role": "user", "content": "hello"}]}, headers={"X-Requested-With": "price-agent"})).status_code == 400
+        assert (await first.put("/settings/model", json={"provider": "openai"}, headers={"X-Requested-With": "price-agent"})).status_code == 200
+        assert (await first.get("/settings/model")).json()["data"]["provider"] == "openai"
+
+        original_client = httpx.AsyncClient
+        upstream_status = 200
+        expected_provider = "openai"
+
+        def handler(request):
+            if expected_provider == "anthropic":
+                assert str(request.url) == "https://api.anthropic.com/v1/messages"
+                assert request.headers["x-api-key"] == "sk-test-first-cccc"
+            else:
+                assert str(request.url) == "https://api.openai.com/v1/chat/completions"
+                assert request.headers["authorization"] == "Bearer sk-test-first-aaaa"
+            assert b"sk-test-first-aaaa" not in request.content
+            if upstream_status == 401:
+                return httpx.Response(401, json={"error": "rejected"})
+            if expected_provider == "anthropic":
+                return httpx.Response(200, json={"content": [{"type": "text", "text": "Anthropic 的回复"}]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "来自用户模型的回复"}}]})
+
+        monkeypatch.setattr(chat_service.httpx, "AsyncClient", lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs))
+        request = {"messages": [{"role": "user", "content": "推荐耳机"}]}
+        response = await first.post("/chat/message", json=request, headers={"X-Requested-With": "price-agent"})
+        assert response.status_code == 200
+        assert response.json()["data"]["content"] == "来自用户模型的回复"
+        assert "sk-test-first-aaaa" not in response.text
+        assert (await second.post("/chat/message", json=request, headers={"X-Requested-With": "price-agent"})).status_code == 400
+
+        await first.put("/settings/api-keys/anthropic", json={"api_key": "sk-test-first-cccc"}, headers={"X-Requested-With": "price-agent"})
+        assert (await first.put("/settings/model", json={"provider": "anthropic"}, headers={"X-Requested-With": "price-agent"})).status_code == 200
+        expected_provider = "anthropic"
+        response = await first.post("/chat/message", json=request, headers={"X-Requested-With": "price-agent"})
+        assert response.status_code == 200
+        assert response.json()["data"]["content"] == "Anthropic 的回复"
+
+        await first.put("/settings/model", json={"provider": "openai"}, headers={"X-Requested-With": "price-agent"})
+        expected_provider = "openai"
+
+        upstream_status = 401
+        response = await first.post("/chat/message", json=request, headers={"X-Requested-With": "price-agent"})
+        assert response.status_code == 500
+        assert {row["provider"]: row["status"] for row in (await first.get("/settings/api-keys")).json()["data"]}["openai"] == "invalid"
+        await first.delete("/settings/api-keys/openai", headers={"X-Requested-With": "price-agent"})
+        assert (await first.get("/settings/model")).json()["data"]["provider"] is None

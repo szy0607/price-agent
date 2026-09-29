@@ -123,6 +123,7 @@ npm run build    # 产物 dist/
 | `docs/M0-基座-trace_id中间件与健康检查-设计.md` | M0 基座（trace_id、健康检查）设计 |
 | `docs/代码审查-异步连接与Session规范.md` | 异步连接与 Session 规范审查 |
 | `docs/注册登录-实现指引.md` | 注册登录实现指引 |
+| `docs/第三方API-Key加密存储.md` | 用户 API Key 加密、模型选择、咨询调用与轮换操作 |
 
 ## 当前进度与路线图
 
@@ -132,7 +133,7 @@ npm run build    # 产物 dist/
 | M1 后端核心链路 | FastAPI + LangGraph 五 Agent + Mock | ⬜ 未开始 |
 | M2 契约与画像 | JSON Schema 契约 + A0 画像 Agent | ⬜ 未开始 |
 | M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis 缓存 | ⬜ 未开始（业务库与迁移已就绪） |
-| M4 前端联调 | frontend-web 接后端 | ⬜ 未开始（已配 `/auth` 代理） |
+| M4 前端联调 | frontend-web 接后端 | 🔵 进行中（登录、设置与文本模型咨询已接后端） |
 | M5 真实联盟 API | 多多进宝 → 淘宝 → 京东 | ⬜ 未开始（当前 Mock） |
 | M6 安全合规加固 | 沙箱、限流、隐私 | ⬜ 未开始 |
 | M7 上线 | 部署、监控、验收 | ⬜ 未开始 |
