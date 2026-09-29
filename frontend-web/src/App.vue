@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { PhArrowsLeftRight, PhChatCircleDots, PhGearSix, PhLightning, PhTag } from '@phosphor-icons/vue'
+import { PhArrowsLeftRight, PhChartPie, PhChatCircleDots, PhGearSix, PhHeart, PhLightning, PhPackage, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
 import { isAuthenticated, refreshAuth } from './utils/auth'
 
@@ -21,6 +21,10 @@ const links = [
   { to: '/chat', label: '智能咨询', icon: PhChatCircleDots },
   { to: '/compare', label: '款式对比', icon: PhArrowsLeftRight },
   { to: '/coupon', label: '领券指引', icon: PhTag },
+  // v0.6 新增功能：tab 先用占位图标，内容未开发
+  { to: '/wishlist', label: '心愿单', icon: PhHeart },
+  { to: '/items', label: '物品库', icon: PhPackage },
+  { to: '/spending', label: '消费记录', icon: PhChartPie },
   { to: '/settings', label: '设置', icon: PhGearSix },
 ]
 </script>

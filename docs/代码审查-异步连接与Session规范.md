@@ -57,7 +57,7 @@
 | 级别 | 问题 | 改法 |
 |------|------|------|
 | P0 | 目录拼写 `shcema` → **`schemas`**；文件 `user_sche.py` | 改为 `app/schemas/user.py`（或 `auth.py`） |
-| — | `main.py` / `router/register.py` 空 | 按契约 §4 顺序补 |
+| — | `main.py` / `router/register.py` 空 | ⚠️ `router/register.py` **已不存在**（注册已并入 `log_in.py`）；按契约 §4 顺序补 |
 
 ### 2.5 依赖缺失（P0）
 
@@ -140,7 +140,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 @router.post("/register", status_code=201)
 async def register(payload: RegisterReq, session: SessionDep):
     data = await auth_service.register(session, payload)
-    return {"code": 0, "message": "ok", "data": data}
+    return {"code": 0, "msg": "success", "data": data}
 ```
 
 ### 3.3 在 service 里用（提交 / 回滚归业务）
@@ -183,7 +183,7 @@ async def register(session: AsyncSession, payload: RegisterReq):
 
 > ⚠️ 下表是 **2026-09-16 的原始清单**，勾选状态已于 **2026-09-20 更新**；最新状态与新增项见 **§10 第三轮复评**。
 
-- [x] 🔴 **`.env` 加入 `.gitignore`** —— 已加。**但 `.env` 仍被 git 跟踪并已入库**（提交 `69fb606`，内含 MySQL root 密码）→ 见 §10，这是**未解决的遗留安全问题**
+- [x] 🔴 **`.env` 加入 `.gitignore`** —— 已加，**且 `git ls-files` 已不含 `.env`（不再被跟踪）**。**但 git 历史仍留痕**（提交 `69fb606`，内含 MySQL root 密码）→ 见 §10，**密码仍需更换**
 - [x] 建虚拟环境 + `requirements.txt` / `requirements-dev.txt`（见 §7）
 - [x] 拆 `config.py` → `core/config.py` + `database/base.py` + `database/session.py`（见 §6）
       —— 注意：实际目录是 `database/`（不是 §6.1 示例里的 `db/`）
@@ -328,6 +328,8 @@ httpx
 
 ### 7.3 装法
 
+> ⚠️ **本节已过时（2026-09-21 起）**：本项目**不用 `.venv`**，实际环境是 conda 的 **`fast`**（Python 3.10.20）。`conda activate fast` 后直接在项目根跑 `pip` 即可；下面的 `python -m venv .venv` 步骤已作废（`.venv` 已于 2026-09-21 删除）。
+
 ```bash
 python -m venv .venv
 source .venv/Scripts/activate          # Windows Git Bash
@@ -408,6 +410,8 @@ DB_ECHO = os.getenv("DB_ECHO", "false")   # 你以为是 False
 一句话：把"配置读错"从**运行时、离根因很远的晦涩报错**，变成**启动时、点名到字段的清晰报错**（fail fast）。
 
 ### 9.3 改造写法
+
+> ⚠️ **本节已过时（2026-09-21 起）**：这里写的 `app/config.py` 是当时的旧路径；配置已搬到 **`app/core/config.py`**（`model_config` 用 `BASE_DIR / ".env"` 绝对路径）。本节保留作「为什么」参考。
 
 **最小改动**（保留你现在 `DB_URL` 单变量）
 
@@ -499,6 +503,8 @@ class Settings(BaseSettings):
 5. 删掉 `load_dotenv()` 与 `import os`
 
 ### 9.6 动手步骤（照着敲）
+
+> ⚠️ **本节已过时（2026-09-21 起）**：① 不用 `.venv`（用 conda `fast`，见 §7.3）；② 配置**早已迁到 `app/core/config.py`**，`app/config.py` 已不存在，无需再「重写」它。以下步骤只作历史记录。
 
 **Step 1 · 装包 + 确认 `.env` 在项目根**
 ```bash
@@ -641,23 +647,23 @@ DB_URL=Y python -c "from app.config import Settings; print(Settings().db_url)"  
 | `connect_args` 挂错对象 | `database/session.py` | 已从 `async_sessionmaker` 挪到 `create_async_engine`（详见 §10.3） |
 | MySQL 会话时区钉 UTC | `database/session.py` | 实测 `@@session.time_zone = +00:00`，`NOW()` 比本地时间小 8h |
 | 目录拼写 `shcema` → `schemas` | `app/schemas/` | — |
-| `users` 模型从 `database/` 移出 | `app/model/user.py` | — |
+| `users` 模型从 `database/` 移出 | `app/models/user.py` | — |
+| `core/security.py` + `core/errors.py` 落地 | `app/core/` | 已实现（`security.py` **29 行**、`errors.py` **83 行**），**不再是 0 字节空文件** |
 
 ### 10.2 仍待修 🔴 / 🟡
 
 | 级别 | 位置 | 问题 | 改法 |
 |---|---|---|---|
-| 🔴 | `.env` | **被 git 跟踪且已入库**（提交 `69fb606`；remote `github.com/szy0607/price-agent`），内含 MySQL `root` 密码 | `git rm --cached .env` + **改密码**（历史已留痕，仅 untrack 不够） |
+| 🔴 | `.env` | 已**不再被跟踪**（`git ls-files` 不含 `.env`，`.gitignore` 已含它）；**但历史仍留痕**（提交 `69fb606`；remote `github.com/szy0607/price-agent`），内含 MySQL `root` 密码 | ✅ 已完成 `git rm --cached .env`；**密码仍需更换**（历史已留痕，仅 untrack 不够） |
 | 🔴 | `.env` | 应用用 **`root`** 连库，违反契约 §9.3「专用最小权限账号」 | 建 `price_agent` 账号并切 `.env` |
-| 🔴 | `app/core/security.py`、`app/core/errors.py` | 均为 **0 字节**，本轮必需 | 见实现指引 §5 / §6 |
-| 🔴 | `app/model/user.py` | 字段仍是旧版：`user_email`/`username`/`create_time` 命名不符；`id` 是 `Integer` 而非 `BigInteger` | 按契约 §1.1 **重写为 5 字段**（不再补 `nickname`/`status`/`updated_at`/`deleted_at`） |
+| 🔴 | `app/models/user.py` | 字段仍是旧版：`user_email`/`username`/`create_time` 命名不符；`id` 是 `Integer` 而非 `BigInteger` | 按契约 §1.1 **重写为 5 字段**（不再补 `nickname`/`status`/`updated_at`/`deleted_at`） |
 | 🔴 | `app/schemas/user_sche.py` | 被清空成只剩两行 import | 至少落一个**不含 `password_hash`** 的 `UserResp` |
 | 🔴 | `app/router/{register,log_in}.py` | 前缀仍是 `/register`、`/login`；函数体 `pass` | ✅ 已实现。⚠️ 2026-09-23 前缀口径**改为 `/auth/*`**（按代码回写契约，不挂 `/api/v1`，见契约 §2.0） |
 | 🔴 | `app/main.py` | 只有 2 行，无 `include_router` | 挂载路由 + trace_id 中间件 + `/health` |
-| 🟡 | `app/model/` | 目录名用**单数**，契约 §4.3 要求复数 | `model/` → `models/` |
+| ✅ | `app/models/` | ~~目录名用单数~~ 已是复数（契约 §4.3 要求） | ✅ 已完成：`model/` → `models/` |
 | 🟡 | `app/database/session.py` | sessionmaker 缺 `class_=AsyncSession`、`autoflush=False` | 按 §3.1 标准写法补齐 |
-| 🟡 | `.gitignore` | 仍缺 `.venv/`、`__pycache__/`、`*.py[cod]`、`.pytest_cache/` | 补上（`.venv/` 自带内容为 `*` 的 `.gitignore`，但显式更清楚） |
-| 🟡 | `app/repository/`、`app/services/`、`app/api/` | 空目录。**git 不跟踪空目录**，别人克隆后不存在 | `repository/` 本轮不建→建议删；`services/` 待建 |
+| 🟡 | `.gitignore` | 前三项（`.venv/`、`__pycache__/`、`*.py[cod]`）**已补上**；现在**只缺 `.pytest_cache/`** | 补上 `.pytest_cache/` |
+| 🟡 | `app/repository/`、`app/services/`、`app/api/` | `repository/auth_repo.py` **已建且被 `log_in.py` 使用**；`services/`、`api/` 仍是空占位（只有 `__init__.py`） | `services/` 待建 |
 | 🟢 | `users` 表 | **尚不存在**（实测 `Table 'price_agent.users' doesn't exist`） | 建表前务必 `import models`，否则 `create_all()` 一声不响什么都不建 |
 
 ### 10.3 本轮最有价值的一条经验：参数挂错对象 = 静默失效
@@ -731,42 +737,42 @@ async def login(payload: LoginReq, session: SessionDep):
 
 | 位置 | 问题（实测原文） | 改法 |
 |---|---|---|
-| `app/core/security.py:3` | `from config import settings` → `ModuleNotFoundError: No module named 'config'`。**`app.router.log_in` import 即崩** | `from app.core.config import settings` |
-| `app/schemas/user_sche.py` | `PydanticUserError: A non-annotated attribute was detected`。`Annotated[str, Field(...)]` 缺类型注解 | `user_email: str = Field(...)` |
-| `app/router/log_in.py` | 无 `Depends`、无 `await`、`raise ValueError` → 500；参数裸写 → FastAPI 当 **query 参数**而非 JSON body | 注入 `SessionDep`；改用 `LoginReq` / `RegisterReq` body |
-| `app/router/register.py` | 只校验密码强度就返回成功，**没有查重、没有哈希、没有插库** | 见实现指引 §10 的 `register()` |
-| `app/main.py` | 实测路由表只有 `['/openapi.json','/docs','/docs/oauth2-redirect','/redoc']`，**一个业务路由都没挂** | `include_router(auth_router)` |
+| `app/core/security.py:3` | `from config import settings` → `ModuleNotFoundError: No module named 'config'`。**`app.router.log_in` import 即崩** | ✅ **已修**：现为 `from app.core.config import settings`（`app/core/security.py:3`） |
+| `app/schemas/user_sche.py` | `PydanticUserError: A non-annotated attribute was detected`。`Annotated[str, Field(...)]` 缺类型注解 | ✅ **已修**：注解已正确，`PydanticUserError` 不再出现 |
+| `app/router/log_in.py` | 无 `Depends`、无 `await`、`raise ValueError` → 500；参数裸写 → FastAPI 当 **query 参数**而非 JSON body | ✅ **已修**：`app/router/log_in.py:18` 已用 `Depends(get_db_session)` + body + `await` |
+| `app/router/register.py` | 只校验密码强度就返回成功，**没有查重、没有哈希、没有插库** | ✅ **该文件已不存在**，注册已并入 `log_in.py`（`app/router/log_in.py:27-38`） |
+| `app/main.py` | 实测路由表只有 `['/openapi.json','/docs','/docs/oauth2-redirect','/redoc']`，**一个业务路由都没挂** | ✅ **已修**：`app/main.py:11-12` 已 `include_router(auth_router)` + `health_router` |
 | `app/router/*.py` | 前缀 `/auth`、`/register` ≠ 契约 §2.1 的 `/api/v1/auth/*` | ✅ 2026-09-23 已定：**前缀口径是 `/auth/*`**（按代码回写契约，不挂 `/api/v1`） |
-| `users` 表 | 实测库为**空库**：`SHOW TABLES` 返回空 | `import models` 后 `create_all()` |
+| `users` 表 | 实测库为**空库**：`SHOW TABLES` 返回空 | ✅ **已修**：`users` 表已建（Alembic 首版迁移，见实现指引 §0.1） |
 
 ### 11.4 顺带发现（非 session，但同源）
 
 1. **bcrypt 阻塞事件循环**——实测 cost=12：`hashpw 189ms`、`checkpw 188ms`。
    在 `async def` 里直接调 = 事件循环停 190ms，登录 QPS 一上来就串行化。
    建议 `await asyncio.to_thread(hash_password, pw)`。
-2. **~~`check_password_strength` 逻辑写反了~~ —— 本条已更正（2026-09-21 实测）**
+2. **~~`check_password_strength` 逻辑写反了~~ —— 本条已更正（2026-09-21 实测）：现逻辑与文案已自洽**
    > ⚠️ **我上一轮写错了**：当时 `import app.core.security` 因 `from config import settings` 就崩，
    > 那段"实测"**根本没跑成**，我拿推断当实测写了。现已真正跑通，结论不同。
 
-   **实际逻辑没有写反**：`if not has_letter and not has_digit` = 「既没字母**且**没数字才拦」，
-   与它自己的消息「必须包含字母**或**数字」是**自洽的**。实测：
-   `'!!!!!!!!'` → **被正确拒绝**；`'abcdefgh'`、`'12345678'` → 通过。
+   **逻辑与文案同向**：`if not has_letter.search(...) or not has_digit.search(...)` = 「缺字母**或**缺数字才拦」，
+   与它自己的消息「必须包含字母**且**数字」**一致**。实测：
+   `'!!!!!!!!'`、`'abcdefgh'`、`'12345678'` → **均被正确拒绝**（`app/core/security.py:27-28`）。
 
-   **真正的问题是「三处口径不一致」**：
+   **遗留差异只剩「长度口径」**：
 
    | 位置 | 口径 | 实测结果 |
    |---|---|---|
-   | `check_password_strength` 逻辑 | 有字母 **或** 有数字 | `'12345678'`（纯数字）**通过** |
-   | `log_in.py` 的错误消息 | 「必须包含字母**和**数字」 | **消息在说谎** |
-   | 契约 §2.1 | 8–64 且含字母**与**数字 | 未实现 |
-   | `.env` | 6–20 | 与契约的 8–64 不符 |
+   | `check_password_strength` 逻辑 | 有字母 **且** 有数字 | `'12345678'`（纯数字）**被拒** ✅ |
+   | `log_in.py` 的错误消息 | 「必须包含字母**且**数字」 | **与逻辑一致** ✅ |
+   | 契约 §2.1 | 8–64 且含字母**与**数字 | 未实现（实际 6–18） |
+   | `.env` | 6–18 | 与契约的 8–64 不符 |
 
    **连带隐患**：声明 `->bool` 却 `raise` → 调用方 `if not check_password_strength(...)`
    **永远不为真**，异常直接冒到 500。要么改成返回 `False`，要么调用方别用 `if not` 包它。
 
-   **另需注意**：强度校验按**字符数**限长（20），bcrypt 按**字节**截断（72）——两者单位不同，
+   **另需注意**：强度校验按**字符数**限长（18），bcrypt 按**字节**截断（72）——两者单位不同，
    见下方第 5 条。
-3. **密码长度口径不一致**——`.env` 是 6~20，契约 §2.1 是 **8–64**。
+3. **密码长度口径不一致**——`.env` 是 **6~18**，契约 §2.1 是 **8–64**。
 4. **防用户枚举没做**——`get_pw_hash` 对「用户不存在」与「密码错」给不同信息。
    更隐蔽的是**时间差**：不存在时 0ms（不跑 bcrypt），密码错时 188ms，
    响应时间本身就是枚举信道。实现指引 §10 第⑤条已明确要求两条路径**完全一致**。

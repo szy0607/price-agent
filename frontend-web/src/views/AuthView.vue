@@ -1,9 +1,9 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhArrowsLeftRight, PhChatCircleDots, PhCheckCircle, PhEye, PhEyeSlash, PhLightning, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { getCurrentUser, loginUser, registerUser } from '../utils/api'
+import { getCaptcha, getCurrentUser, loginUser, registerUser } from '../utils/api'
 import { bestPlat, cheapest, PLATFORMS, PLAT_KEYS, products } from '../mock/data'
 import { setAuthUser } from '../utils/auth'
 
@@ -11,11 +11,14 @@ const router = useRouter()
 const route = useRoute()
 const loginBg = `${import.meta.env.BASE_URL}images/login-bg.jpg`
 const mode = ref(route.query.mode === 'register' ? 'register' : 'login')
-const form = ref({ user_email: '', username: '', password: '', confirmPassword: '' })
+const form = ref({ user_email: '', username: '', password: '', confirmPassword: '', captcha_code: '' })
 const showPassword = ref(false)
 const pending = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+// 图形验证码：后端一次下发 token + 图片（自研无状态方案，见契约 §2.5；token 只有 120 秒有效期）
+const captcha = ref({ token: '', image: '' })
+const captchaLoading = ref(false)
 
 const isRegister = computed(() => mode.value === 'register')
 const showcaseProduct = products[0]
@@ -35,13 +38,33 @@ const capabilities = [
   { icon: PhChatCircleDots, title: '用一句话开始咨询', desc: '粘贴商品链接，或直接说出预算和需求，Agent 会继续追问并给出建议。' },
 ]
 
+async function loadCaptcha() {
+  captchaLoading.value = true
+  try {
+    const data = await getCaptcha()
+    captcha.value = { token: data.captcha_token, image: data.image_base64 }
+    form.value.captcha_code = ''
+  } catch (error) {
+    captcha.value = { token: '', image: '' }
+    errorMessage.value = error.message || '验证码加载失败，请点击图片重试'
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
 function switchMode(nextMode) {
   mode.value = nextMode
   errorMessage.value = ''
   successMessage.value = ''
+  if (nextMode === 'login') loadCaptcha()
   const redirect = route.query.redirect
   router.replace({ query: { ...(nextMode === 'register' ? { mode: 'register' } : {}), ...(redirect ? { redirect } : {}) } })
 }
+
+// 打开页面即取一次验证码（只有登录才需要；注册接口不带验证码字段）
+onMounted(() => {
+  if (!isRegister.value) loadCaptcha()
+})
 
 function focusLoginForm() {
   const formSection = document.getElementById('auth-form-section')
@@ -63,6 +86,14 @@ async function submit() {
     errorMessage.value = '两次输入的密码不一致'
     return
   }
+  if (!isRegister.value && !captcha.value.token) {
+    errorMessage.value = '验证码未加载，请点击图片重试'
+    return
+  }
+  if (!isRegister.value && !form.value.captcha_code.trim()) {
+    errorMessage.value = '请输入验证码'
+    return
+  }
 
   pending.value = true
   try {
@@ -74,13 +105,20 @@ async function submit() {
       switchMode('login')
       successMessage.value = '注册成功，请使用新账号登录'
     } else {
-      await loginUser({ user_email: email, password })
+      await loginUser({
+        user_email: email,
+        password,
+        captcha_token: captcha.value.token,
+        captcha_code: form.value.captcha_code.trim(),
+      })
       setAuthUser(await getCurrentUser())
       successMessage.value = '登录成功'
       setTimeout(() => router.push(route.query.redirect || '/chat'), 450)
     }
   } catch (error) {
     errorMessage.value = error.message || '请求失败，请稍后重试'
+    // 失败就换一张：token 可能已过期（120 秒），或这次答案已经用掉了机会
+    if (!isRegister.value) loadCaptcha()
   } finally {
     pending.value = false
   }
@@ -134,6 +172,15 @@ async function submit() {
             </label>
             <label v-if="isRegister" class="auth-label">确认密码
               <input v-model="form.confirmPassword" type="password" autocomplete="new-password" class="auth-input" placeholder="再次输入密码" />
+            </label>
+            <label v-if="!isRegister" class="auth-label">验证码
+              <span class="auth-captcha-row">
+                <input v-model="form.captcha_code" type="text" autocomplete="off" maxlength="4" class="auth-input" placeholder="输入图中的 4 位字符" />
+                <button type="button" class="auth-captcha" :disabled="captchaLoading" aria-label="点击刷新验证码" title="点击刷新" @click="loadCaptcha">
+                  <img v-if="captcha.image" :src="captcha.image" alt="验证码，点击可刷新" />
+                  <span v-else class="auth-captcha__hint">{{ captchaLoading ? '加载中…' : '点击加载' }}</span>
+                </button>
+              </span>
             </label>
 
             <p v-if="errorMessage" class="rounded-lg bg-red-50 px-3.5 py-3 text-sm text-red-700 dark:bg-red-400/10 dark:text-red-300" role="alert">{{ errorMessage }}</p>
@@ -361,6 +408,53 @@ async function submit() {
   border-color: #2563eb;
   background: #fff;
   box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
+}
+
+/* 图形验证码：输入框 + 可点击刷新的图片 */
+.auth-captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.auth-captcha-row .auth-input {
+  flex: 1;
+  margin-top: 0;
+}
+
+.auth-captcha {
+  display: grid;
+  flex: none;
+  width: 138px;
+  height: 48px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid #d4d4d8;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 180ms ease;
+}
+
+.auth-captcha:hover:not(:disabled) {
+  border-color: #2563eb;
+}
+
+.auth-captcha:disabled {
+  cursor: wait;
+}
+
+.auth-captcha img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.auth-captcha__hint {
+  color: #a1a1aa;
+  font-size: 0.75rem;
 }
 
 .auth-submit,
@@ -643,6 +737,10 @@ async function submit() {
 
   .auth-input:focus {
     background: rgb(9 15 28 / 0.9);
+  }
+
+  .auth-captcha {
+    border-color: #3f4652;
   }
 
   .auth-reasoning-stage {

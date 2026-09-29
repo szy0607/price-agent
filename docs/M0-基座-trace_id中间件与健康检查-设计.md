@@ -177,7 +177,7 @@ class TraceMiddleware:
 
 ```json
 健康: { "code": 0,     "msg": "success", "data": { "status": "ok" } }        HTTP 200
-不健康: { "code": 50000, "msg": "内部服务器错误", "data": null }  HTTP 503
+不健康: { "code": 50000, "msg": "服务不可用", "data": null }  HTTP 503
 ```
 
 **为什么不返裸 `{"status":"ok"}`**：项目有一条不变量——「**所有响应都是 `{code,msg,data}`**」（契约 §2.0）。
@@ -186,8 +186,13 @@ class TraceMiddleware:
 **为什么 `code` 用 `50000` 而不是新码**：`ErrorCode` 只有 7 个，**禁止发明第八个**（既定纪律）。
 DB 连不上就是"服务器内部错误"，语义成立。
 
-> ⚠️ **不能走 `HTTPException(503)`**：`errors.py` 的 `_h_http` 会把状态码映射成 `503*100+1 = 50301`——一个不存在的错误码。
-> → `/health` **必须自己返回 `JSONResponse`**，不经过 `_h_http`。
+> ⚠️ **不能走 `HTTPException(503)`**：`errors.py` 的 `_h_http` 不是"状态码换算公式"，而是查表
+> `code = _HTTP_TO_CODE.get(exc.status_code, ErrorCode.INTERNAL)`（`errors.py:72-75`）。
+> `_HTTP_TO_CODE`（`errors.py:30-37`）只登记了 400 / 401 / 403 / 404 / 405 / 429，**没有 503**，
+> 所以 503 只会落到兜底值 `ErrorCode.INTERNAL = 50000`。
+> 于是真走 `_h_http` 时 `code` 恰好也是 `50000`、外层 `status` 仍是 503，**看起来结果一致**——
+> 但这靠的是"查表落空"的隐式兜底，不是为 `/health` 设计的路径：将来谁往表里补一个 503，行为就悄悄变了。
+> → `/health` **必须自己返回 `JSONResponse`**，把 `code` / `msg` / `status` 显式写死，不经过 `_h_http`。
 
 ### 4.2 状态码：健康 `200`，不健康**必须 `503`**
 
@@ -217,7 +222,7 @@ DB 连不上就是"服务器内部错误"，语义成立。
 - **怎么探**：**自己 `try/except` 包住**，不要用 `Depends(get_db_session)` 直接依赖。
   - 原因：`get_db_session` 连不上库时是**抛异常**的。异常一路冒到兜底处理器 → 返回 **500**（不是 503），
     而且日志里会刷一条"未处理异常"——**一个预期的运维状态被记成了程序 bug**。
-- ⚠️ **必须加超时**（1–2s）。库卡住时 `/health` 不能陪着一起挂：探测超时会被判定为不健康 →
+- ⚠️ **必须加超时**（实测代码取 **5s**，见 §9.5）。库卡住时 `/health` 不能陪着一起挂：探测超时会被判定为不健康 →
   流量被摘掉 / 部署脚本误判失败，雪上加霜。
   （本项目 `async_engine` 配了 `pool_timeout=30`，所以自己的超时必须远小于它，否则先撞池超时。）
 
@@ -552,6 +557,11 @@ def envelope(code:int,msg:str,http_status:int,data=None,headers:dict|None=None) 
 
 > ✅ **循环 import 检查**：`core/trace.py` 零依赖（只 import `contextvars`）→ `core/errors.py` import 它安全。
 
+> 📌 **实际实现与上面模板的差异（等价，不是缺陷）**：`app/core/errors.py:78-82` 的 `_h_exc` 在返回前多了一步
+> `if trace_id: set_trace_id(trace_id)` —— 即**把 `request.state` 里的 trace_id 重新写回 contextvar**（供日志 Filter 读取），
+> 这样那条 `logger.exception(...)` 与同一请求的后续日志也能带上 trace_id。
+> 相比模板只是"多复写了一次 contextvar"，**属等价实现**，最终响应头同样带 `X-Trace-Id`，不必视为偏离规格。
+
 ### 9.5 `app/router/health.py`（新建）
 
 ```python
@@ -578,7 +588,7 @@ logger = logging.getLogger(__name__)
 
 health_router = APIRouter(tags=["health"])
 
-_DB_PROBE_TIMEOUT = 2.0
+_DB_PROBE_TIMEOUT = 5.0
 
 
 async def _probe_db() -> None:
@@ -588,7 +598,7 @@ async def _probe_db() -> None:
 
 # 返回注解写 JSONResponse 是安全的：FastAPI 遇到 Response 子类会跳过 response_model。
 @health_router.get("/health")
-async def health() -> JSONResponse:
+async def health_check() -> JSONResponse:
     try:
         await asyncio.wait_for(_probe_db(), timeout=_DB_PROBE_TIMEOUT)
     except Exception:
@@ -597,7 +607,7 @@ async def health() -> JSONResponse:
         logger.warning("健康检查失败：数据库不可达")
         return JSONResponse(
             status_code=503,
-            content={"code": ErrorCode.INTERNAL, "msg": "内部服务器错误", "data": None},
+            content={"code": ErrorCode.INTERNAL, "msg": "服务不可用", "data": None},
         )
     return JSONResponse(status_code=200, content=success({"status": "ok"}))
 ```

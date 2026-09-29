@@ -1,7 +1,7 @@
 """Add per-user encrypted API key storage.
 
 Revision ID: 9b72c4e8d5a1
-Revises: f7fa5f121d6e
+Revises: 0f11e35680eb
 """
 
 from typing import Sequence, Union
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision: str = "9b72c4e8d5a1"
-down_revision: Union[str, None] = "f7fa5f121d6e"
+down_revision: Union[str, None] = "0f11e35680eb"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
