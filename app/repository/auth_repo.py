@@ -6,6 +6,12 @@ from app.core.time import get_current_time
 from app.models import UserSession
 from app.models.user import User
 from app.core.cookie import SESSION_TTL
+async def get_user_id(user_email:str,session:AsyncSession)->int:
+    user = await session.scalar(select(User).where(User.user_email == user_email))
+    if user:
+            return user.id
+    else:
+        raise BizError(ErrorCode.CREDENTIALS,"邮箱或密码错误")
 async def get_pw_hash(user_email:str,session:AsyncSession)->str:
     user = await session.scalar(select(User).where(User.user_email == user_email))
     if user:
