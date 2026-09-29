@@ -14,6 +14,8 @@ COOKIE_SECURE=false
 
 每个版本的 KEK 是独立的 32 字节随机值，经 Base64 编码后放入 JSON 对象。可在受控主机上用 `python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"` 生成。不要将值写入 Git、命令行参数、日志或数据库。生产环境应限制进程及主机访问权限，测试环境须使用不同密钥，并将 `COOKIE_SECURE` 设为 `true`、通过 HTTPS 同源部署前后端。未配置 KEK 时原有注册登录可启动，但 Key 设置接口会返回通用内部错误。
 
+仅在本机开发环境、`.env` 已存在且两项 KEK 配置都未设置时，可以运行 `python -m scripts.init_local_kek`。命令生成随机 KEK，追加到被 Git 忽略的 `.env`，不输出密钥值；完成后重启后端。不要在已有加密数据的环境删除或替换旧 KEK，应按下文轮换流程处理，并备份生产 KEK。
+
 首次使用前，在各自的 `price_agent` 数据库执行 `alembic upgrade head`，再确认 `alembic current` 与唯一的 `alembic heads` 一致。新迁移建立 `user_key_envelopes` 和 `user_api_keys` 两张表，不写入任何用户数据。库内只保存 Base64 编码的 AES-256-GCM 密文、独立随机 nonce、认证标签和密钥版本。数据库备份也要加密；TDE 不替代应用层加密。
 
 设置页还需要 `user_sessions` 表。登录成功后浏览器获得 HttpOnly、SameSite=Lax 的会话 Cookie；数据库只保存 token 的 SHA-256。`GET /auth/me` 恢复当前用户，`POST /auth/logout` 撤销会话。会话有效期 7 天，剩余不足 3 天时续期。前端不再以本地邮箱标记判断登录状态。开发期 Vite 同时代理 `/auth` 和 `/settings`；GitHub Pages 上的纯静态部署不能直接提供同源后端，正式上线须配合同源后端入口。
@@ -76,4 +78,4 @@ KEK 命令按用户事务重包装 DEK，可重复运行；输出尚未采用目
 
 `python -m unittest discover -s tests -p test_api_key_crypto.py -v` 验证密码学边界。迁移后的可清理本机 MySQL 上设置 `RUN_MYSQL_KEY_TESTS=1`，再运行 `pytest tests/test_api_key_service.py -v`；测试会创建并删除自己的随机用户及会话。覆盖首次并发写入、保存与轮换并发、失效状态、解密、篡改、事务回滚和设置接口的登录隔离。前端运行 `npm run build`。执行前确认该库允许创建和删除测试用户。
 
-2026-09-29 本机验证：加密和 MySQL/HTTP 集成测试共 11 项通过，含用户密钥隔离和两种上游协议的模拟响应；`npm run build` 通过；`alembic current` 与唯一的 `alembic heads` 均为 `e4a6b8c0d2f1`。未向真实模型服务商发起收费请求。本机 `.env` 尚未设置 KEK，因此浏览器中的实际 Key 保存仍需完成上述配置后使用。
+2026-09-29 本机验证：加密、KEK 初始化和 MySQL/HTTP 集成测试共 12 项通过，含用户密钥隔离和两种上游协议的模拟响应；`npm run build` 通过；`alembic current` 与唯一的 `alembic heads` 均为 `e4a6b8c0d2f1`。未向真实模型服务商发起收费请求。本机开发 `.env` 已通过初始化命令生成 KEK 并重启服务；生产环境仍需独立生成、保管和备份密钥。

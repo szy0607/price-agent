@@ -1,8 +1,12 @@
 import base64
 import json
 import secrets
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+
+from scripts.init_local_kek import initialize
 
 from app.core.api_key_crypto import (
     EncryptedBlob,
@@ -22,6 +26,17 @@ def ring() -> KeyRing:
 
 
 class ApiKeyCryptoTests(unittest.TestCase):
+    def test_local_kek_initializer_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text("DB_URL=example\n", encoding="utf-8")
+            self.assertTrue(initialize(env_path))
+            content = env_path.read_text(encoding="utf-8")
+            self.assertFalse(initialize(env_path))
+            self.assertEqual(env_path.read_text(encoding="utf-8"), content)
+            ring_value = next(line.split("=", 1)[1].strip("'\n") for line in content.splitlines() if line.startswith("API_KEY_KEKS="))
+            self.assertEqual(len(base64.b64decode(json.loads(ring_value)["v1"])), 32)
+
     def test_encryption_round_trip_and_fresh_nonces(self):
         keys = ring()
         dek = new_dek()
