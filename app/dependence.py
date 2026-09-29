@@ -1,5 +1,5 @@
-from typing import AsyncGenerator
-from fastapi import Response, Cookie, Depends
+from typing import Annotated, AsyncGenerator
+from fastapi import Response, Cookie, Depends, Request
 from sqlalchemy import select
 from app.core.time import get_current_time
 from app.core.cookie import SESSION_TOKEN_NAME, SESSION_TTL_SECONDS, set_session_token, RENEW_THRESHOLD, SESSION_TTL
@@ -44,3 +44,11 @@ session_token:str | None = Cookie(default=None,alias=SESSION_TOKEN_NAME)
         set_session_token(response,session_token)
 
     return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_session)]
+
+
+def require_same_origin_write(request: Request) -> None:
+    if request.headers.get("X-Requested-With") != "price-agent":
+        raise BizError(ErrorCode.PARAM_INVALID, "请求无效")

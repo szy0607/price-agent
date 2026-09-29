@@ -5,8 +5,8 @@ from sqlalchemy import select
 from app.core.api_key_crypto import KeyConfigurationError, KeyRing, normalize_provider
 from app.core.config import settings
 from app.core.errors import BizError, ErrorCode, success
-from app.core.session_auth import CurrentUser, require_same_origin_write
 from app.database.session import async_session_local
+from app.dependence import CurrentUser, require_same_origin_write
 from app.models import User, UserApiKey
 from app.services.api_key_service import ApiKeyService
 from app.services.chat_service import MODEL_PROVIDERS

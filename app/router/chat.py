@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.core.api_key_crypto import KeyConfigurationError, KeyRing
 from app.core.config import settings
 from app.core.errors import BizError, ErrorCode, success
-from app.core.session_auth import CurrentUser, require_same_origin_write
+from app.dependence import CurrentUser, require_same_origin_write
 from app.services.api_key_service import KeyRecordError
 from app.services.chat_service import MODEL_PROVIDERS, ModelCallError, answer_with_user_key
 
