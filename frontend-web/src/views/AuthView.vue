@@ -3,9 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhArrowsLeftRight, PhChatCircleDots, PhCheckCircle, PhEye, PhEyeSlash, PhLightning, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { getCaptcha, loginUser, registerUser } from '../utils/api'
+import { getCaptcha, getCurrentUser, loginUser, registerUser } from '../utils/api'
 import { bestPlat, cheapest, PLATFORMS, PLAT_KEYS, products } from '../mock/data'
-import { setAuthEmail } from '../utils/auth'
+import { setAuthUser } from '../utils/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -111,7 +111,7 @@ async function submit() {
         captcha_token: captcha.value.token,
         captcha_code: form.value.captcha_code.trim(),
       })
-      setAuthEmail(email)
+      setAuthUser(await getCurrentUser())
       successMessage.value = '登录成功'
       setTimeout(() => router.push(route.query.redirect || '/chat'), 450)
     }

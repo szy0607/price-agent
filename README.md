@@ -16,7 +16,8 @@
 | 款式对比 `/compare` | 双价矩阵（公开价 A / 领券价 B）+ 规格表 + 券明细 + 对比结论，支持淘宝 / 京东 / 拼多多三平台 tab 切换 |
 | 领券指引 `/coupon` | 券类型、分平台领券步骤、权益矩阵、复制口令跳转 App |
 | 用户画像 | 从对话中解析预算 / 平台偏好 / 学生身份 / 价格敏感度 / 会员身份（PLUS、88VIP），本地持久化并生成个性化推荐附注 |
-| 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证），bcrypt 密码哈希，用户数据与登录记录落库 MySQL；`user_sessions` 会话表已建（Cookie 会话存储层），下发 / 校验实现中；前端登录态暂以 localStorage 占位 |
+| 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证），bcrypt 密码哈希，用户数据与登录记录落库 MySQL；`user_sessions` 会话表 + Cookie 会话下发与校验已落地 |
+| 设置 | 账号与第三方 API Key 管理；服务端会话鉴权、Key 加密存储和脱敏展示 |
 
 > v0.6 规划功能「心愿单与购买决策 `/wishlist` / 个人物品库 `/items` / 消费记录与预算 `/spending`」已在前端注册占位路由（ComingSoonView，需登录），内容待开发。
 
@@ -128,6 +129,7 @@ npm run build    # 产物 dist/
 | `docs/M0-基座-trace_id中间件与健康检查-设计.md` | M0 基座（trace_id、健康检查）设计 |
 | `docs/代码审查-异步连接与Session规范.md` | 异步连接与 Session 规范审查 |
 | `docs/注册登录-实现指引.md` | 注册登录实现指引（施工手册：按什么顺序动手、每步为什么） |
+| `docs/第三方API-Key加密存储.md` | 用户 API Key 加密、模型选择、咨询调用与轮换操作 |
 | `docs/参考-Yuxi存储层搭配与可借鉴清单.md` | 参考项目 `F:\Yuxi` 存储层调研（可用 9 / 有条件 4 / 不可搬 7） |
 | `docs/架构契约审查-待商定.md` | 组件启用时机与数据归属（Redis 分阶段、双库边界、缓存语义） |
 
@@ -139,7 +141,7 @@ npm run build    # 产物 dist/
 | M1 后端核心链路 | FastAPI + LangGraph 五 Agent + Mock | ⬜ 未开始 |
 | M2 契约与画像 | JSON Schema 契约 + A0 画像 Agent | ⬜ 未开始 |
 | M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis（联盟 API 缓存、对话最近消息热缓存） | ⬜ 未开始（业务库与迁移已就绪） |
-| M4 前端联调 | frontend-web 接后端 | 🔵 进行中（登录 / 注册 / 验证码已前后端联调；业务页 /chat 等仍为 Mock） |
+| M4 前端联调 | frontend-web 接后端 | 🔵 进行中（登录 / 注册 / 验证码 + Cookie 会话 + API Key 设置与真实模型咨询已接后端；业务页 /compare /coupon 等仍为 Mock） |
 | M5 真实联盟 API | 多多进宝 → 淘宝 → 京东 | ⬜ 未开始（当前 Mock） |
 | M6 安全合规加固 | 沙箱、限流、隐私 | ⬜ 未开始 |
 | M7 上线 | 部署、监控、验收 | ⬜ 未开始 |

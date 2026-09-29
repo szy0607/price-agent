@@ -20,6 +20,7 @@
 # ---------- Web 框架 ----------
 # fastapi：低于 0.100 不支持 pydantic v2，会被拖回 v1（用法完全不同）
 fastapi>=0.110
+httpx>=0.27
 # uvicorn[standard]：[standard] 才带 --reload(watchfiles)/httptools；
 #   Windows 上不含 uvloop（uvloop 仅 *nix），别指望它在 Windows 生效
 uvicorn[standard]>=0.29
