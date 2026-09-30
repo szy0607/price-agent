@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { PhChatsCircle, PhGearSix, PhPaperPlaneRight, PhPlus } from '@phosphor-icons/vue'
+import { PhChatsCircle, PhCpu, PhGearSix, PhPaperPlaneRight, PhPlus } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import { getModelSetting, sendChatMessage } from '../utils/api'
+import { loadRecords } from '../utils/parameterRecords'
 
 let nextId = 1
 const createSession = () => ({ id: nextId++, title: '新咨询', messages: [], error: '' })
@@ -14,7 +15,12 @@ const input = ref('')
 const sending = ref(false)
 const listRef = ref(null)
 const modelSetting = ref({ provider: null, options: [] })
+const contextItems = ref([])
 const activeModel = computed(() => modelSetting.value.options.find((item) => item.provider === modelSetting.value.provider))
+const modelSummary = computed(() => {
+  if (!activeModel.value) return { label: '尚未选择模型', detail: '前往设置完成配置' }
+  return { label: activeModel.value.label || activeModel.value.provider, detail: activeModel.value.model || '已连接' }
+})
 
 function scrollToBottom() {
   nextTick(() => { if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight })
@@ -63,6 +69,8 @@ async function send() {
 }
 
 onMounted(async () => {
+  const contextIds = new URLSearchParams(window.location.search).get('items')
+  if (contextIds) contextItems.value = loadRecords().filter((item) => contextIds.split(',').includes(item.id))
   try {
     modelSetting.value = await getModelSetting()
   } catch {
@@ -74,7 +82,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="grid h-[calc(100dvh-4rem)] w-full grid-cols-1 overflow-hidden bg-zinc-50 md:grid-cols-[240px_minmax(0,1fr)] dark:bg-zinc-950">
+  <div class="grid h-[calc(100dvh-4.5rem)] w-full grid-cols-1 overflow-hidden bg-zinc-50 md:grid-cols-[240px_minmax(0,1fr)] dark:bg-zinc-950">
     <aside class="hidden min-h-0 flex-col border-r border-zinc-200 px-3 py-4 md:flex dark:border-zinc-800">
       <button type="button" class="flex h-10 items-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-medium text-zinc-800 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900" @click="addSession">
         <PhPlus :size="17" />新咨询
@@ -88,17 +96,22 @@ onMounted(async () => {
     </aside>
 
     <section class="flex min-h-0 min-w-0 flex-col">
-      <header class="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-4 sm:px-7 dark:border-zinc-800">
+      <header class="flex h-[4.5rem] shrink-0 items-center justify-between gap-3 border-b border-zinc-200/80 bg-white/70 px-4 backdrop-blur-sm sm:px-7 dark:border-zinc-800 dark:bg-zinc-950/70">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent dark:bg-accent/20"><BrandIcon :size="19" /></span>
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-accent shadow-[0_4px_14px_-8px_rgba(37,99,235,.7)] dark:border-blue-900/60 dark:bg-blue-950/60"><BrandIcon :size="19" /></span>
           <div class="min-w-0">
             <h1 class="truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ activeSession.title }}</h1>
-            <p class="truncate text-xs text-zinc-500 dark:text-zinc-400">{{ activeModel ? `${activeModel.label} · ${activeModel.model}` : '未选择咨询模型' }}</p>
+            <div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs" :class="activeModel ? 'text-zinc-500 dark:text-zinc-400' : 'text-amber-600 dark:text-amber-300'">
+              <PhCpu :size="13" weight="duotone" class="shrink-0" />
+              <span class="truncate font-medium">{{ modelSummary.label }}</span>
+              <span class="shrink-0 text-zinc-300 dark:text-zinc-700">·</span>
+              <span class="truncate">{{ modelSummary.detail }}</span>
+            </div>
           </div>
         </div>
         <div class="flex items-center gap-2">
           <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800" title="新咨询" aria-label="新咨询" @click="addSession"><PhPlus :size="19" /></button>
-          <RouterLink to="/settings" class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" title="模型设置" aria-label="模型设置"><PhGearSix :size="19" /></RouterLink>
+          <RouterLink to="/settings" class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800" title="模型设置" aria-label="模型设置"><PhGearSix :size="19" /></RouterLink>
         </div>
       </header>
 
@@ -109,6 +122,7 @@ onMounted(async () => {
       </div>
 
       <div ref="listRef" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-7">
+        <div v-if="contextItems.length" class="mx-auto mb-5 flex max-w-3xl items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"><PhCpu :size="14" /><span>已带入 {{ contextItems.length }} 件商品参数：{{ contextItems.map((item) => item.name).join('、') }}</span></div>
         <div v-if="!activeSession.messages.length" class="mx-auto flex h-full max-w-lg flex-col items-center justify-center text-center">
           <BrandIcon :size="35" class="text-accent" />
           <h2 class="mt-5 text-xl font-semibold text-zinc-950 dark:text-white">开始咨询</h2>

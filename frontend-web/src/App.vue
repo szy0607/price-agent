@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { PhArrowsLeftRight, PhChartPie, PhChatCircleDots, PhGearSix, PhHeart, PhLightning, PhPackage, PhSignOut, PhTag } from '@phosphor-icons/vue'
+import { PhChartPie, PhChatCircleDots, PhGearSix, PhLightning, PhPackage, PhSignOut, PhShoppingCart } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
 import { isAuthenticated, refreshAuth, signOut as logoutCurrentUser } from './utils/auth'
 
@@ -11,6 +11,7 @@ const authenticated = ref(isAuthenticated())
 const signingOut = ref(false)
 const showFunctionalNav = computed(() => route.name !== 'auth' && authenticated.value)
 const isAuthPage = computed(() => route.name === 'auth')
+const brandTarget = computed(() => (authenticated.value ? '/chat' : '/auth'))
 const syncAuth = () => { authenticated.value = isAuthenticated() }
 onMounted(() => {
   window.addEventListener('price-agent-auth-changed', syncAuth)
@@ -21,10 +22,7 @@ onBeforeUnmount(() => {
 })
 const links = [
   { to: '/chat', label: '智能咨询', icon: PhChatCircleDots },
-  { to: '/compare', label: '款式对比', icon: PhArrowsLeftRight },
-  { to: '/coupon', label: '领券指引', icon: PhTag },
-  // v0.6 新增功能：tab 先用占位图标，内容未开发
-  { to: '/wishlist', label: '心愿单', icon: PhHeart },
+  { to: '/cart', label: '购物车', icon: PhShoppingCart },
   { to: '/items', label: '物品库', icon: PhPackage },
   { to: '/spending', label: '消费记录', icon: PhChartPie },
   { to: '/settings', label: '设置', icon: PhGearSix },
@@ -62,24 +60,24 @@ async function handleSignOut() {
           : 'sticky border-b border-zinc-200/70 bg-zinc-50/85 dark:border-zinc-800 dark:bg-zinc-950/85'
       "
     >
-      <nav class="flex h-16 w-full items-center gap-3 px-4 sm:gap-8 sm:px-6">
-        <RouterLink to="/" class="flex shrink-0 items-center gap-2.5">
-          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft dark:bg-accent/20">
+      <nav class="mx-auto flex h-[4.5rem] w-full items-center gap-3 px-4 sm:gap-8 sm:px-7 lg:px-9">
+        <RouterLink :to="brandTarget" class="group flex shrink-0 items-center gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-white/80 dark:hover:bg-zinc-900/80">
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 shadow-[0_4px_14px_-8px_rgba(37,99,235,.7)] transition-transform group-hover:scale-[1.04] dark:border-blue-900/60 dark:bg-blue-950/60">
             <BrandIcon :size="21" />
           </span>
-          <span class="text-[15px] font-semibold tracking-tight max-[380px]:hidden">智能导购 Agent</span>
+          <span class="text-[15px] font-semibold tracking-tight text-zinc-900 max-[380px]:hidden dark:text-zinc-100">智能导购 <span class="font-normal text-zinc-500 dark:text-zinc-400">Agent</span></span>
         </RouterLink>
-        <div v-if="showFunctionalNav" class="ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto">
+        <div v-if="showFunctionalNav" class="ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto rounded-2xl border border-zinc-200/80 bg-white/70 p-1 shadow-[0_8px_30px_-24px_rgba(15,23,42,.55)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/70">
           <RouterLink
             v-for="l in links"
             :key="l.to"
             :to="l.to"
             :title="l.label"
             :aria-label="l.label"
-            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-[10px] px-2 text-sm transition-colors sm:h-auto sm:min-w-0 sm:px-3.5 sm:py-2"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl px-2 text-sm transition-all sm:h-auto sm:min-w-0 sm:px-3.5 sm:py-2"
             :class="
               route.path === l.to
-                ? 'bg-accent-soft font-medium text-accent-strong dark:bg-accent/15 dark:text-blue-300'
+                ? 'bg-blue-50 font-medium text-blue-700 shadow-sm dark:bg-blue-950/70 dark:text-blue-300'
                 : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
             "
           >
@@ -88,7 +86,7 @@ async function handleSignOut() {
           </RouterLink>
           <RouterLink
             to="/chat"
-            class="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-[10px] bg-accent px-3 py-2 text-sm font-medium text-white transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
+            class="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white shadow-[0_6px_16px_-8px_rgba(37,99,235,.9)] transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
           >
             <PhLightning :size="15" weight="bold" />
             <span class="max-[430px]:hidden">开始咨询</span>
@@ -98,7 +96,7 @@ async function handleSignOut() {
             title="退出登录"
             aria-label="退出登录"
             :disabled="signingOut"
-            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-[10px] text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
             @click="handleSignOut"
           >
             <PhSignOut :size="18" />
