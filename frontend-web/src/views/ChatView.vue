@@ -98,7 +98,6 @@ onMounted(async () => {
     <section class="flex min-h-0 min-w-0 flex-col">
       <header class="flex h-[4.5rem] shrink-0 items-center justify-between gap-3 border-b border-zinc-200/80 bg-white/70 px-4 backdrop-blur-sm sm:px-7 dark:border-zinc-800 dark:bg-zinc-950/70">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-accent shadow-[0_4px_14px_-8px_rgba(37,99,235,.7)] dark:border-blue-900/60 dark:bg-blue-950/60"><BrandIcon :size="19" /></span>
           <div class="min-w-0">
             <h1 class="truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ activeSession.title }}</h1>
             <div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs" :class="activeModel ? 'text-zinc-500 dark:text-zinc-400' : 'text-amber-600 dark:text-amber-300'">

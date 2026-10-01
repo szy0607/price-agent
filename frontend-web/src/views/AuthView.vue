@@ -37,6 +37,11 @@ const capabilities = [
   { icon: PhTag, title: '公开价与领券价同时算', desc: '不只报一个低价，公开价、券后价和券的限制条件一起展示。' },
   { icon: PhChatCircleDots, title: '用一句话开始咨询', desc: '粘贴商品链接，或直接说出预算和需求，Agent 会继续追问并给出建议。' },
 ]
+const ringCards = Array.from({ length: 37 }, (_, index) => ({
+  id: index,
+  image: products[index % products.length].image,
+  alt: index === 0 ? products[0].name : '',
+}))
 
 async function loadCaptcha() {
   captchaLoading.value = true
@@ -126,187 +131,53 @@ async function submit() {
 </script>
 
 <template>
-  <div class="auth-page">
-    <section class="auth-hero relative isolate">
-      <div aria-hidden="true" class="auth-hero__image" :style="{ backgroundImage: `url(${loginBg})` }"></div>
-      <div aria-hidden="true" class="auth-hero__wash"></div>
-      <div class="auth-hero__layout mx-auto grid max-w-[1480px] items-center gap-x-20 gap-y-12 px-5 pb-16 pt-24 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(390px,0.72fr)] lg:px-12 lg:pb-20">
-        <div class="auth-hero__intro lg:col-start-1 lg:row-start-1">
-          <p class="mb-5 text-sm font-semibold text-accent">购物之前，先把差异看清楚</p>
-          <h1 class="text-4xl font-bold leading-[1.08] text-zinc-950 sm:text-5xl lg:text-6xl dark:text-white">好选择，<br /><span class="text-accent">从看懂价格开始。</span></h1>
-          <p class="mt-6 max-w-[48ch] text-base leading-7 text-zinc-700 dark:text-zinc-200">
-            横向比较商品款式与平台到手价。登录后继续咨询，让每个决定都有依据。
-          </p>
-        </div>
+  <main class="vertex-page">
+    <div class="vertex-stage" aria-hidden="true"><div class="vertex-grid"></div></div>
 
-        <section id="auth-form-section" class="auth-form-panel lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          <button type="button" class="mb-8 inline-flex items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100" @click="router.back()">
-            <PhArrowLeft :size="15" /> 返回
-          </button>
-          <div class="flex items-end justify-between gap-4">
-            <div>
-              <h2 class="text-2xl font-semibold text-zinc-950 dark:text-white">{{ isRegister ? '创建你的账号' : '欢迎回来' }}</h2>
-              <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{{ isRegister ? '注册后即可开始你的购物咨询。' : '登录后继续你的购物咨询。' }}</p>
-            </div>
-          </div>
+    <header class="vertex-nav">
+      <RouterLink to="/auth" class="vertex-brand" aria-label="智能导购 Agent 首页">
+        <BrandIcon :size="26" />
+        <span><small>SHOP INTELLIGENCE</small><b>PRICE AGENT</b></span>
+      </RouterLink>
+      <nav class="vertex-links" aria-label="页面导航">
+        <a href="#how">工作方式</a><a href="#signals">价格信号</a><a href="#trust">可信建议</a>
+      </nav>
+      <a href="#auth-form-section" class="vertex-btn vertex-btn--nav"><span>开始咨询</span></a>
+    </header>
 
-          <div class="mt-7 grid grid-cols-2 border-b border-zinc-200 dark:border-zinc-700" role="tablist">
-            <button type="button" class="auth-tab" :class="!isRegister && 'auth-tab--active'" @click="switchMode('login')">登录</button>
-            <button type="button" class="auth-tab" :class="isRegister && 'auth-tab--active'" @click="switchMode('register')">注册</button>
-          </div>
-
-          <form class="mt-7 space-y-5" @submit.prevent="submit">
-            <label v-if="isRegister" class="auth-label">用户名
-              <input v-model="form.username" type="text" autocomplete="username" maxlength="50" class="auth-input" placeholder="怎么称呼你" />
-            </label>
-            <label class="auth-label">邮箱
-              <input v-model="form.user_email" type="email" autocomplete="email" class="auth-input" placeholder="you@example.com" />
-            </label>
-            <label class="auth-label">密码
-              <span class="relative mt-2 block">
-                <input v-model="form.password" :type="showPassword ? 'text' : 'password'" :autocomplete="isRegister ? 'new-password' : 'current-password'" class="auth-input pr-12" placeholder="6–18 位，含字母和数字" />
-                <button type="button" class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-zinc-400 transition-colors hover:text-zinc-800 dark:hover:text-zinc-100" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">
-                  <PhEyeSlash v-if="showPassword" :size="19" /><PhEye v-else :size="19" />
-                </button>
-              </span>
-            </label>
-            <label v-if="isRegister" class="auth-label">确认密码
-              <input v-model="form.confirmPassword" type="password" autocomplete="new-password" class="auth-input" placeholder="再次输入密码" />
-            </label>
-            <label v-if="!isRegister" class="auth-label">验证码
-              <span class="auth-captcha-row">
-                <input v-model="form.captcha_code" type="text" autocomplete="off" maxlength="4" class="auth-input" placeholder="输入图中的 4 位字符" />
-                <button type="button" class="auth-captcha" :disabled="captchaLoading" aria-label="点击刷新验证码" title="点击刷新" @click="loadCaptcha">
-                  <img v-if="captcha.image" :src="captcha.image" alt="验证码，点击可刷新" />
-                  <span v-else class="auth-captcha__hint">{{ captchaLoading ? '加载中…' : '点击加载' }}</span>
-                </button>
-              </span>
-            </label>
-
-            <p v-if="errorMessage" class="rounded-lg bg-red-50 px-3.5 py-3 text-sm text-red-700 dark:bg-red-400/10 dark:text-red-300" role="alert">{{ errorMessage }}</p>
-            <p v-if="successMessage" class="flex items-center gap-2 rounded-lg bg-emerald-50 px-3.5 py-3 text-sm text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" role="status"><PhCheckCircle :size="17" />{{ successMessage }}</p>
-            <button type="submit" :disabled="pending" class="auth-submit">
-              <PhLightning :size="16" weight="bold" />{{ pending ? '提交中…' : (isRegister ? '创建账号' : '登录，继续咨询') }}
-            </button>
-          </form>
-          <p class="mt-5 text-center text-xs leading-5 text-zinc-500 dark:text-zinc-400">不代下单、不代支付，你始终掌握最后决定。</p>
-        </section>
-
-        <div class="auth-reasoning-stage lg:col-start-1 lg:row-start-2" v-reveal="100">
-          <div class="auth-question">
-            <span class="auth-question__icon"><PhChatCircleDots :size="17" /></span>
-            <div class="min-w-0">
-              <p class="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">用户提问</p>
-              <p class="mt-1 text-sm font-medium leading-5 text-zinc-800 dark:text-zinc-100">3000 以内推荐降噪耳机，我通勤用</p>
-            </div>
-          </div>
-
-          <div class="auth-reasoning-flow">
-            <article v-for="step in responseSteps" :key="step.agent" class="auth-reasoning-step">
-              <span class="auth-reasoning-step__marker"><component :is="step.icon" :size="15" weight="bold" /></span>
-              <div class="min-w-0 pt-0.5">
-                <h3 class="flex items-center gap-2 text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                  <span class="font-mono text-[10px] font-medium text-zinc-400">{{ step.agent }}</span>
-                  {{ step.title }}
-                </h3>
-                <p class="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{{ step.detail }}</p>
-              </div>
-            </article>
-          </div>
-
-          <div class="auth-reasoning-answer">
-            <PhCheckCircle :size="18" weight="fill" class="mt-0.5 shrink-0 text-price-b dark:text-emerald-400" />
-            <div>
-              <p class="text-xs font-semibold text-zinc-900 dark:text-zinc-100">建议摘要</p>
-              <p class="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{{ showcaseRecommendation }}</p>
-            </div>
-          </div>
+    <section class="vertex-hero">
+      <div class="vertex-copy">
+        <div class="vertex-badge"><i><PhLightning :size="16" weight="bold" /></i><b>让每次购买都有依据</b></div>
+        <h1>买之前<br /><em>先把价格看懂</em></h1>
+        <p>比较商品款式与平台到手价，公开价、券后价和限制条件一起说明。</p>
+        <a href="#auth-form-section" class="vertex-btn vertex-btn--hero"><span>登录，开始咨询</span></a>
+        <div class="vertex-product-preview">
+          <img :src="showcaseProduct.image" :alt="showcaseProduct.name" />
+          <div><span>正在比较</span><strong>{{ showcaseProduct.name }}</strong><small>{{ showcaseProduct.brand }} · {{ showcaseProduct.category }}</small></div>
+          <div class="vertex-product-prices"><b v-for="pk in PLAT_KEYS" :key="pk">{{ PLATFORMS[pk].name }} <em>¥{{ cheapest(showcaseProduct, pk).prices[pk].b }}</em></b></div>
         </div>
       </div>
+
+      <section id="auth-form-section" class="vertex-auth-panel">
+        <button type="button" class="vertex-back" @click="router.back"><PhArrowLeft :size="15" /> 返回</button>
+        <div class="vertex-panel-heading"><span>SECURE ACCESS</span><h2>{{ isRegister ? '创建你的账号' : '欢迎回来' }}</h2><p>{{ isRegister ? '注册后即可开始购物咨询。' : '登录后继续你的购物咨询。' }}</p></div>
+        <div class="vertex-tabs" role="tablist"><button type="button" :class="{ active: !isRegister }" @click="switchMode('login')">登录</button><button type="button" :class="{ active: isRegister }" @click="switchMode('register')">注册</button></div>
+        <form @submit.prevent="submit">
+          <label v-if="isRegister" class="vertex-label">用户名<input v-model="form.username" type="text" autocomplete="username" maxlength="50" placeholder="怎么称呼你" /></label>
+          <label class="vertex-label">邮箱<input v-model="form.user_email" type="email" autocomplete="email" placeholder="you@example.com" /></label>
+          <label class="vertex-label">密码<span class="vertex-password"><input v-model="form.password" :type="showPassword ? 'text' : 'password'" :autocomplete="isRegister ? 'new-password' : 'current-password'" placeholder="6–18 位，含字母和数字" /><button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><PhEyeSlash v-if="showPassword" :size="18" /><PhEye v-else :size="18" /></button></span></label>
+          <label v-if="isRegister" class="vertex-label">确认密码<input v-model="form.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" /></label>
+          <label v-if="!isRegister" class="vertex-label">验证码<span class="vertex-captcha"><input v-model="form.captcha_code" type="text" autocomplete="off" maxlength="4" placeholder="输入图中的 4 位字符" /><button type="button" :disabled="captchaLoading" aria-label="点击刷新验证码" @click="loadCaptcha"><img v-if="captcha.image" :src="captcha.image" alt="验证码，点击可刷新" /><span v-else>{{ captchaLoading ? '加载中' : '点击加载' }}</span></button></span></label>
+          <p v-if="errorMessage" class="vertex-message vertex-message--error" role="alert">{{ errorMessage }}</p><p v-if="successMessage" class="vertex-message vertex-message--ok" role="status"><PhCheckCircle :size="16" />{{ successMessage }}</p>
+          <button type="submit" class="vertex-submit" :disabled="pending"><PhLightning :size="16" weight="bold" />{{ pending ? '提交中' : (isRegister ? '创建账号' : '登录，继续咨询') }}</button>
+        </form>
+        <p class="vertex-legal">不代下单，不代支付。最后决定始终由你掌握。</p>
+      </section>
     </section>
 
-    <section class="auth-capabilities">
-      <div class="mx-auto grid max-w-[1320px] gap-12 px-5 py-20 sm:px-8 md:py-28 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1fr)] lg:gap-24 lg:px-12">
-        <div class="max-w-[42ch]">
-          <p class="text-sm font-semibold text-accent">登录后，你会得到什么</p>
-          <h2 class="mt-4 text-3xl font-semibold leading-tight text-zinc-950 sm:text-4xl dark:text-white">把购物前的犹豫，变成可比较的信息。</h2>
-          <p class="mt-5 text-[15px] leading-7 text-zinc-600 dark:text-zinc-400">比较的不止是一个数字，还包括款式差异、领券条件和购买限制。</p>
-        </div>
-        <div class="divide-y divide-zinc-200 dark:divide-zinc-800">
-          <article v-for="(item, index) in capabilities" :key="item.title" class="grid gap-4 py-6 first:pt-0 last:pb-0 sm:grid-cols-[48px_1fr] sm:gap-6">
-            <component :is="item.icon" :size="25" class="mt-1 text-accent" />
-            <div>
-              <h3 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{{ item.title }}</h3>
-              <p class="mt-2 max-w-[60ch] text-sm leading-6 text-zinc-600 dark:text-zinc-400">{{ item.desc }}</p>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section class="auth-conversation">
-      <div class="mx-auto grid max-w-[1320px] items-center gap-12 px-5 py-20 sm:px-8 md:py-28 lg:grid-cols-[minmax(280px,0.7fr)_minmax(0,1fr)] lg:gap-24 lg:px-12">
-        <div class="max-w-[44ch]">
-          <p class="text-sm font-semibold text-accent">从你的问题开始</p>
-          <h2 class="mt-4 text-3xl font-semibold leading-tight text-zinc-950 sm:text-4xl dark:text-white">把需求说清楚，答案也会更贴近你。</h2>
-          <p class="mt-5 text-[15px] leading-7 text-zinc-600 dark:text-zinc-400">预算、使用场景、偏好平台，都可以直接告诉智能导购。它会整理商品和价格情报，再解释推荐理由。</p>
-          <button type="button" class="auth-secondary-action" @click="focusLoginForm">现在登录，开始咨询 <PhLightning :size="15" weight="bold" /></button>
-        </div>
-        <div class="auth-chat-preview" v-reveal="120">
-          <div class="flex justify-end">
-            <div class="max-w-[80%] rounded-2xl rounded-br-md bg-accent px-4 py-3 text-sm leading-6 text-white">3000 以内推荐降噪耳机，我通勤用</div>
-          </div>
-          <div class="mt-5 flex gap-3">
-            <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft dark:bg-accent/20"><BrandIcon :size="17" /></span>
-            <div class="min-w-0 flex-1">
-              <p class="text-sm leading-6 text-zinc-600 dark:text-zinc-300">我整理了这款耳机的款式与平台价格。{{ showcaseRecommendation }}</p>
-              <div class="mt-5 grid gap-4 border-t border-zinc-200 pt-4 dark:border-zinc-700 sm:grid-cols-[72px_1fr]">
-                <img :src="showcaseProduct.image" :alt="showcaseProduct.name" class="h-[72px] w-[72px] rounded-xl bg-white object-contain" />
-                <div class="min-w-0 self-center">
-                  <p class="text-sm font-semibold text-zinc-900 dark:text-white">{{ showcaseProduct.name }}</p>
-                  <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{{ showcaseProduct.brand }} · 3 个款式</p>
-                  <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
-                    <span v-for="pk in PLAT_KEYS" :key="pk">{{ PLATFORMS[pk].name }} <span class="font-mono tabular-nums">¥{{ cheapest(showcaseProduct, pk).prices[pk].b }}</span></span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="auth-products">
-      <div class="mx-auto max-w-[1320px] px-5 py-20 sm:px-8 md:py-28 lg:px-12">
-        <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)] lg:items-end">
-          <div class="max-w-[48ch]">
-            <p class="text-sm font-semibold text-accent">真实商品，真实比较方式</p>
-            <h2 class="mt-4 text-3xl font-semibold leading-tight text-zinc-950 sm:text-4xl dark:text-white">同一件商品，三个平台同时看。</h2>
-          </div>
-          <p class="max-w-[46ch] text-sm leading-6 text-zinc-600 lg:justify-self-end dark:text-zinc-400">公开价、券后价与平台活动并排展示，具体款式和限制也会一并说明。</p>
-        </div>
-        <div class="auth-product-gallery mt-12">
-          <article v-for="(p, index) in products" :key="p.id" class="auth-product-item" :class="{ 'auth-product-item--feature': index === 0 }">
-            <div class="auth-product-item__image">
-              <img :src="p.image" :alt="p.name" loading="lazy" />
-            </div>
-            <div class="auth-product-item__body">
-              <div class="min-w-0">
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ p.brand }} · {{ p.category }}</p>
-                <h3 class="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{{ p.name }}</h3>
-              </div>
-              <div class="mt-4 space-y-2.5">
-                <div v-for="pk in PLAT_KEYS" :key="pk" class="flex items-center justify-between gap-3 text-[13px]">
-                  <span class="text-zinc-500 dark:text-zinc-400">{{ PLATFORMS[pk].name }}</span>
-                  <span class="font-mono tabular-nums" :class="bestPlat(p).plat === pk ? 'font-semibold text-price-b dark:text-emerald-400' : 'text-zinc-700 dark:text-zinc-300'">¥{{ cheapest(p, pk).prices[pk].b }}</span>
-                </div>
-              </div>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-  </div>
+    <section id="how" class="vertex-proof"><div><span class="vertex-kicker">A CLEARER ROUTE TO BUY</span><h2>把犹豫变成可比较的信息。</h2></div><div class="vertex-proof-list"><article v-for="(item, index) in capabilities" :key="item.title"><span>0{{ index + 1 }}</span><component :is="item.icon" :size="22" /><div><h3>{{ item.title }}</h3><p>{{ item.desc }}</p></div></article></div></section>
+    <section id="signals" class="vertex-signal"><div class="vertex-signal__query">3000 以内推荐降噪耳机，我通勤用</div><div id="trust" class="vertex-signal__answer"><PhCheckCircle :size="20" weight="fill" /><p><strong>建议摘要</strong>{{ showcaseRecommendation }}</p></div><button type="button" class="vertex-btn vertex-btn--small" @click="focusLoginForm"><span>开始一次真实咨询</span></button></section>
+  </main>
 </template>
 
 <style scoped>
