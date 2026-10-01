@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhArrowsLeftRight, PhChatCircleDots, PhCheckCircle, PhEye, PhEyeSlash, PhLightning, PhTag } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
@@ -26,6 +26,11 @@ const showcaseBest = bestPlat(showcaseProduct)
 const showcasePlat = showcaseBest.plat
 const showcaseRecommendation = `目前券后价最低的是${PLATFORMS[showcasePlat].name}（¥${showcaseBest.price}），下单前请确认优惠条件和页面实时价格。`
 const showcasePriceSummary = PLAT_KEYS.map((platform) => `${PLATFORMS[platform].name} ¥${cheapest(showcaseProduct, platform).prices[platform].b}`).join(' · ')
+const showcaseInsights = [
+  { label: '最低到手', value: `¥${showcaseBest.price}`, detail: `${PLATFORMS[showcasePlat].name} · ${showcaseBest.sku.name}` },
+  { label: '可比平台', value: `${PLAT_KEYS.length} 个`, detail: '淘宝 · 京东 · 拼多多' },
+  { label: '建议动作', value: '先咨询', detail: '按预算和场景筛选' },
+]
 const responseSteps = [
   { agent: 'A1', icon: PhChatCircleDots, title: '拆解需求', detail: '预算不超过 ¥3,000，通勤使用，优先关注降噪体验。' },
   { agent: 'A2', icon: PhArrowsLeftRight, title: '匹配商品与款式', detail: `找到「${showcaseProduct.name}」，核对颜色、版本与核心规格。` },
@@ -33,15 +38,31 @@ const responseSteps = [
   { agent: 'A5', icon: PhLightning, title: '整理推荐依据', detail: `当前${PLATFORMS[showcasePlat].name}报价更低，并标明需要确认的优惠条件。` },
 ]
 const capabilities = [
-  { icon: PhArrowsLeftRight, title: '一眼看懂款式差异', desc: '把关键规格、颜色与版本差异整理在同一张对比表里，减少来回切页面。' },
-  { icon: PhTag, title: '公开价与领券价同时算', desc: '不只报一个低价，公开价、券后价和券的限制条件一起展示。' },
-  { icon: PhChatCircleDots, title: '用一句话开始咨询', desc: '粘贴商品链接，或直接说出预算和需求，Agent 会继续追问并给出建议。' },
+  { icon: PhChatCircleDots, title: '智能咨询', desc: '直接说预算、使用场景或粘贴商品链接，Agent 会帮你拆解需求并给出建议。' },
+  { icon: PhArrowsLeftRight, title: '物品库与参数', desc: '保存家里已有的耳机、保温杯和日用品，随时回看规格与购买记录。' },
+  { icon: PhTag, title: '购物车与优惠', desc: '把候选商品集中放进购物车，核对公开价、券后价和优惠门槛再决定。' },
 ]
 const ringCards = Array.from({ length: 37 }, (_, index) => ({
   id: index,
   image: products[index % products.length].image,
   alt: index === 0 ? products[0].name : '',
 }))
+const cartShowcase = products.flatMap((product, index) => product.skus.slice(0, 2).map((sku, skuIndex) => ({
+  id: `${product.id}-${skuIndex}`,
+  product,
+  sku,
+  quantity: index % 2 + 1,
+  platform: PLAT_KEYS[(index + skuIndex) % PLAT_KEYS.length],
+})))
+const activeSection = ref('auth-form-section')
+const sectionLinks = [
+  { id: 'auth-form-section', label: '登录' },
+  { id: 'product-library', label: '商品库' },
+  { id: 'cart-showcase', label: '购物车' },
+  { id: 'chat-placeholder', label: '智能咨询' },
+  { id: 'spending-placeholder', label: '消费记录' },
+]
+let sectionObserver
 
 async function loadCaptcha() {
   captchaLoading.value = true
@@ -69,7 +90,13 @@ function switchMode(nextMode) {
 // 打开页面即取一次验证码（只有登录才需要；注册接口不带验证码字段）
 onMounted(() => {
   if (!isRegister.value) loadCaptcha()
+  sectionObserver = new IntersectionObserver((entries) => {
+    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+    if (visible) activeSection.value = visible.target.id
+  }, { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.25, 0.5] })
+  sectionLinks.forEach((item) => document.getElementById(item.id) && sectionObserver.observe(document.getElementById(item.id)))
 })
+onBeforeUnmount(() => sectionObserver?.disconnect())
 
 function focusLoginForm() {
   const formSection = document.getElementById('auth-form-section')
@@ -140,21 +167,23 @@ async function submit() {
         <span><small>SHOP INTELLIGENCE</small><b>PRICE AGENT</b></span>
       </RouterLink>
       <nav class="vertex-links" aria-label="页面导航">
-        <a href="#how">工作方式</a><a href="#signals">价格信号</a><a href="#trust">可信建议</a>
+        <a v-for="item in sectionLinks" :key="item.id" :href="`#${item.id}`" :class="{ 'is-active': activeSection === item.id }" @click="activeSection = item.id">{{ item.label }}</a>
       </nav>
-      <a href="#auth-form-section" class="vertex-btn vertex-btn--nav"><span>开始咨询</span></a>
     </header>
 
     <section class="vertex-hero">
       <div class="vertex-copy">
         <div class="vertex-badge"><i><PhLightning :size="16" weight="bold" /></i><b>让每次购买都有依据</b></div>
-        <h1>买之前<br /><em>先把价格看懂</em></h1>
-        <p>比较商品款式与平台到手价，公开价、券后价和限制条件一起说明。</p>
+        <h1>买之前<br /><em>先把选择理清</em></h1>
+        <p>从智能咨询、物品库到购物车，把商品参数、平台价格和优惠条件放在一个地方看懂。</p>
         <a href="#auth-form-section" class="vertex-btn vertex-btn--hero"><span>登录，开始咨询</span></a>
         <div class="vertex-product-preview">
           <img :src="showcaseProduct.image" :alt="showcaseProduct.name" />
           <div><span>正在比较</span><strong>{{ showcaseProduct.name }}</strong><small>{{ showcaseProduct.brand }} · {{ showcaseProduct.category }}</small></div>
           <div class="vertex-product-prices"><b v-for="pk in PLAT_KEYS" :key="pk">{{ PLATFORMS[pk].name }} <em>¥{{ cheapest(showcaseProduct, pk).prices[pk].b }}</em></b></div>
+        </div>
+        <div class="vertex-insight-grid">
+          <article v-for="item in showcaseInsights" :key="item.label"><small>{{ item.label }}</small><strong>{{ item.value }}</strong><span>{{ item.detail }}</span></article>
         </div>
       </div>
 
@@ -175,8 +204,10 @@ async function submit() {
       </section>
     </section>
 
-    <section id="how" class="vertex-proof"><div><span class="vertex-kicker">A CLEARER ROUTE TO BUY</span><h2>把犹豫变成可比较的信息。</h2></div><div class="vertex-proof-list"><article v-for="(item, index) in capabilities" :key="item.title"><span>0{{ index + 1 }}</span><component :is="item.icon" :size="22" /><div><h3>{{ item.title }}</h3><p>{{ item.desc }}</p></div></article></div></section>
-    <section id="signals" class="vertex-signal"><div class="vertex-signal__query">3000 以内推荐降噪耳机，我通勤用</div><div id="trust" class="vertex-signal__answer"><PhCheckCircle :size="20" weight="fill" /><p><strong>建议摘要</strong>{{ showcaseRecommendation }}</p></div><button type="button" class="vertex-btn vertex-btn--small" @click="focusLoginForm"><span>开始一次真实咨询</span></button></section>
+    <section id="product-library" class="vertex-content-section vertex-library"><div class="vertex-section-heading"><span class="vertex-kicker">PRODUCT LIBRARY</span><h2>你的商品库</h2><p>把常买、想买和正在比较的商品放在一起，参数与价格一眼可见。</p></div><div class="vertex-library-grid"><article v-for="product in products" :key="product.id" class="vertex-library-card"><div class="vertex-library-card__image"><img :src="product.image" :alt="product.name" /></div><div class="vertex-library-card__body"><span>{{ product.category }}</span><h3>{{ product.name }}</h3><p>{{ product.brand }} · {{ product.model }}</p><div class="vertex-library-card__price"><strong>¥{{ bestPlat(product).price }}</strong><small>{{ PLATFORMS[bestPlat(product).plat].name }}最低到手</small></div></div></article></div></section>
+    <section id="cart-showcase" class="vertex-content-section vertex-cart"><div class="vertex-section-heading"><span class="vertex-kicker">SHOPPING CART</span><h2>购物车里的候选</h2><p>先收集，再比较。每件商品都保留数量、平台和券后价。</p></div><div class="vertex-cart-list"><article v-for="item in cartShowcase" :key="item.id" class="vertex-cart-item"><img :src="item.product.image" :alt="item.product.name" /><div><strong>{{ item.product.name }}</strong><span>{{ item.sku.name }} · {{ PLATFORMS[item.platform].name }}</span></div><b>¥{{ item.sku.prices[item.platform].b * item.quantity }}</b><small>×{{ item.quantity }}</small></article></div></section>
+    <section id="chat-placeholder" class="vertex-content-section vertex-placeholder"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div><a href="#auth-form-section" class="vertex-btn vertex-btn--small"><span>登录后开始</span></a></section>
+    <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div><span class="vertex-placeholder__badge">即将填入</span></section>
   </main>
 </template>
 
