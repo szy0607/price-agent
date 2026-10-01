@@ -19,7 +19,7 @@ const contextItems = ref([])
 const activeModel = computed(() => modelSetting.value.options.find((item) => item.provider === modelSetting.value.provider))
 const modelSummary = computed(() => {
   if (!activeModel.value) return { label: '尚未选择模型', detail: '前往设置完成配置' }
-  return { label: activeModel.value.label || activeModel.value.provider, detail: activeModel.value.model || '已连接' }
+  return { label: activeModel.value.label || activeModel.value.provider, detail: modelSetting.value.model_name || activeModel.value.model || '已连接' }
 })
 
 function scrollToBottom() {

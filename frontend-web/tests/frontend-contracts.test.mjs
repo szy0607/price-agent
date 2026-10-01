@@ -60,3 +60,37 @@ test('product library parser normalizes JSON and CSV prices', async () => {
   assert.equal(csvProduct.name, '测试水杯')
   assert.equal(csvProduct.skus[0].prices.pdd.b, 79)
 })
+
+test('the settings page never blocks mount on a provider model listing', async () => {
+  const source = await read('src/views/SettingsView.vue')
+  const loadKeys = source.match(/async function loadKeys\(\)[\s\S]*?\n\}/)
+
+  assert.ok(loadKeys, 'loadKeys not found')
+  // 拉模型列表要走服务商，挂在 @change 上按需触发；挂载时只读本地接口
+  assert.doesNotMatch(loadKeys[0], /listProviderModels/)
+  assert.match(loadKeys[0], /Promise\.all\(\[listApiKeys\(\), getModelSetting\(\)\]\)/)
+  assert.match(source, /@change="onProviderChange\(selectedModelProvider\)"/)
+})
+
+test('model listing and selection go through the guarded client calls', async () => {
+  const api = await read('src/utils/api.js')
+  const listing = api.match(/export function listProviderModels\(provider\)[\s\S]*?\n\}/)
+  const setting = api.match(/export function setModelSetting\(provider, modelName = null\)[\s\S]*?\n\}/)
+
+  assert.ok(listing && setting, 'api.js helpers not found')
+  // apiRequest 只在非 GET 时自动注入同源头；这个 GET 会解密用户 Key，必须手动带上
+  assert.match(listing[0], /'X-Requested-With': 'price-agent'/)
+  assert.match(setting[0], /JSON\.stringify\(\{ provider, model_name: modelName \}\)/)
+})
+
+test('the model select always offers the saved choice and the provider default', async () => {
+  const source = await read('src/views/SettingsView.vue')
+  const choices = source.match(/const availableModels = computed\(\(\) => \{[\s\S]*?\n\}\)/)
+
+  assert.ok(choices, 'availableModels not found')
+  assert.match(choices[0], /selectedModelName\.value/)
+  assert.match(choices[0], /（已保存）/)
+  assert.match(choices[0], /（服务商默认）/)
+  // 提交条件必须同时比对厂商和模型，否则「同一厂商换个模型」这个主场景会是禁用状态
+  assert.match(source, /selectedModelProvider === modelSetting\.provider && selectedModelName === storedModelName/)
+})

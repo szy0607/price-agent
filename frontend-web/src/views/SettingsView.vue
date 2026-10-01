@@ -5,7 +5,7 @@ import {
   PhArrowClockwise, PhCheckCircle, PhEye, PhEyeSlash, PhFloppyDisk,
   PhKey, PhPencilSimple, PhPlus, PhTrash, PhWarningCircle, PhX,
 } from '@phosphor-icons/vue'
-import { deleteApiKey, getModelSetting, listApiKeys, saveApiKey, setModelSetting } from '../utils/api'
+import { deleteApiKey, getModelSetting, listApiKeys, listProviderModels, saveApiKey, setModelSetting } from '../utils/api'
 import { clearAuth } from '../utils/auth'
 
 const router = useRouter()
@@ -14,6 +14,12 @@ const modelSetting = ref({ provider: null, options: [] })
 const selectedModelProvider = ref('')
 const selectingModel = ref(false)
 const loading = ref(true)
+const modelByProvider = ref({})
+const modelChoices = ref([])
+const modelChoicesState = ref('idle')
+const modelChoicesError = ref('')
+const selectedModelName = ref('')
+let modelFetchSeq = 0
 const pageError = ref('')
 const feedback = ref('')
 const editingProvider = ref('')
@@ -48,6 +54,35 @@ function displayTime(value) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+function defaultModelFor(value) {
+  return modelSetting.value.options.find((item) => item.provider === value)?.model || ''
+}
+
+function hasActiveKey(value) {
+  return keys.value.some((item) => item.provider === value && item.status === 'active')
+}
+
+const storedModelName = computed(() => modelByProvider.value[selectedModelProvider.value] || defaultModelFor(selectedModelProvider.value))
+
+// 拉取失败或还没拉取时，下拉也必须有的选——唯一一项「服务商默认」。
+// 已保存值与默认值永远并进选项，否则被后端 best-effort 过滤掉的模型会选不中，
+// 或者提交时被静默改成别的模型。
+const availableModels = computed(() => {
+  const fallbackId = defaultModelFor(selectedModelProvider.value)
+  const source = modelChoicesState.value === 'ready' ? [...modelChoices.value] : []
+  const seen = new Set(source.map((item) => item.id))
+  if (selectedModelName.value && !seen.has(selectedModelName.value)) {
+    source.unshift({ id: selectedModelName.value, label: `${selectedModelName.value}（已保存）` })
+    seen.add(selectedModelName.value)
+  }
+  if (fallbackId && !seen.has(fallbackId)) source.push({ id: fallbackId, label: `${fallbackId}（服务商默认）` })
+  return source
+})
+
+const modelNotInList = computed(() => (
+  modelChoicesState.value === 'ready' && !modelChoices.value.some((item) => item.id === selectedModelName.value)
+))
+
 async function loadKeys() {
   loading.value = true
   pageError.value = ''
@@ -57,6 +92,13 @@ async function loadKeys() {
     keys.value = savedKeys
     modelSetting.value = setting
     selectedModelProvider.value = setting.provider || ''
+    modelByProvider.value = Object.fromEntries(savedKeys.map((item) => [item.provider, item.model_name]))
+    modelChoices.value = []
+    modelChoicesState.value = 'idle'
+    modelChoicesError.value = ''
+    selectedModelName.value = selectedModelProvider.value
+      ? modelByProvider.value[selectedModelProvider.value] || defaultModelFor(selectedModelProvider.value)
+      : ''
   } catch (error) {
     if (error.status === 401) {
       clearAuth()
@@ -69,14 +111,45 @@ async function loadKeys() {
   }
 }
 
+async function loadModelChoices(value) {
+  if (!hasActiveKey(value)) {
+    modelChoicesState.value = 'idle'
+    modelChoicesError.value = ''
+    return
+  }
+  // 快速连切厂商时，晚到的旧响应必须丢掉，否则列表会配错厂商。
+  const seq = ++modelFetchSeq
+  modelChoicesState.value = 'loading'
+  modelChoicesError.value = ''
+  try {
+    const data = await listProviderModels(value)
+    if (seq !== modelFetchSeq) return
+    modelChoices.value = data.models || []
+    modelChoicesState.value = 'ready'
+  } catch (error) {
+    if (seq !== modelFetchSeq) return
+    modelChoices.value = []
+    modelChoicesState.value = 'error'
+    modelChoicesError.value = error.message || '无法获取模型列表'
+  }
+}
+
+async function onProviderChange(value) {
+  selectedModelName.value = modelByProvider.value[value] || defaultModelFor(value)
+  modelChoices.value = []
+  await loadModelChoices(value)
+}
+
 async function selectModel() {
   if (!selectedModelProvider.value) return
   selectingModel.value = true
   pageError.value = ''
   feedback.value = ''
   try {
-    await setModelSetting(selectedModelProvider.value)
+    await setModelSetting(selectedModelProvider.value, selectedModelName.value || null)
     modelSetting.value.provider = selectedModelProvider.value
+    modelSetting.value.model_name = selectedModelName.value
+    modelByProvider.value = { ...modelByProvider.value, [selectedModelProvider.value]: selectedModelName.value || null }
     feedback.value = '咨询模型已更新'
   } catch (error) {
     pageError.value = error.message || '切换模型失败'
@@ -204,14 +277,31 @@ onMounted(loadKeys)
             <h3 class="text-base font-semibold text-zinc-900 dark:text-white">咨询使用的模型</h3>
             <div class="mt-3 flex flex-wrap items-end gap-3">
               <label class="min-w-48 flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                服务商与模型
-                <select v-model="selectedModelProvider" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white">
+                服务商
+                <select v-model="selectedModelProvider" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" @change="onProviderChange(selectedModelProvider)">
                   <option value="" disabled>选择已保存的服务商</option>
-                  <option v-for="item in modelSetting.options" :key="item.provider" :value="item.provider" :disabled="!keys.some((key) => key.provider === item.provider && key.status === 'active')">{{ item.label }} · {{ item.model }}</option>
+                  <option v-for="item in modelSetting.options" :key="item.provider" :value="item.provider" :disabled="!hasActiveKey(item.provider)">{{ item.label }} · {{ item.saved_model || item.model }}</option>
                 </select>
               </label>
-              <button type="submit" :disabled="!selectedModelProvider || selectingModel || selectedModelProvider === modelSetting.provider" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"><PhCheckCircle :size="17" />设为默认</button>
+              <label class="min-w-48 flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                模型
+                <select v-model="selectedModelName" :disabled="!selectedModelProvider || modelChoicesState === 'loading'" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white">
+                  <option v-if="!availableModels.length" value="" disabled>先选择服务商</option>
+                  <option v-for="item in availableModels" :key="item.id" :value="item.id">{{ item.label }}</option>
+                </select>
+              </label>
+              <button type="submit" :disabled="!selectedModelProvider || selectingModel || (selectedModelProvider === modelSetting.provider && selectedModelName === storedModelName)" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"><PhCheckCircle :size="17" />设为默认</button>
             </div>
+            <p v-if="modelChoicesState === 'loading'" class="mt-3 text-sm text-zinc-500" role="status">正在读取该服务商的模型列表…</p>
+            <p v-else-if="modelChoicesState === 'error'" class="mt-3 flex flex-wrap items-center gap-2 text-sm text-red-700 dark:text-red-300" role="alert">
+              {{ modelChoicesError }}
+              <button type="button" class="inline-flex items-center gap-1 font-medium underline" @click="loadModelChoices(selectedModelProvider)"><PhArrowClockwise :size="15" />重试</button>
+            </p>
+            <p v-else-if="modelChoicesState === 'idle' && hasActiveKey(selectedModelProvider)" class="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+              未读取模型列表
+              <button type="button" class="inline-flex items-center gap-1 font-medium underline" @click="loadModelChoices(selectedModelProvider)"><PhArrowClockwise :size="15" />获取模型列表</button>
+            </p>
+            <p v-if="modelNotInList" class="mt-2 text-sm text-amber-700 dark:text-amber-300">已保存的模型没有出现在服务商返回的列表里，仍然可用；若调用失败请换一个。</p>
           </form>
 
           <form class="mt-9 border-t border-zinc-200 pt-7 dark:border-zinc-800" @submit.prevent="save">

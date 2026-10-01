@@ -24,19 +24,22 @@ COOKIE_SECURE=false
 
 | 请求 | 用途 |
 |---|---|
-| `GET /settings/api-keys` | 只返回当前用户的服务商、`****` 加后四位、状态与时间 |
+| `GET /settings/api-keys` | 只返回当前用户的服务商、`****` 加后四位、已选模型名、状态与时间 |
 | `PUT /settings/api-keys/{provider}` | 提交 `{ "api_key": "…" }`，新增或替换当前用户的 Key |
 | `DELETE /settings/api-keys/{provider}` | 删除当前用户对应服务商的 Key |
+| `GET /settings/model` | 当前服务商、生效模型名，以及四个服务商的默认模型与各自已记住的模型 |
+| `PUT /settings/model` | 提交 `{ "provider": "…", "model_name": "…" }`，同时设定服务商与该服务商的模型；不传 `model_name` 即清空该厂商的选择，回落默认 |
+| `GET /settings/models/{provider}` | 用该用户此服务商的 Key 向厂商拉一次模型列表 |
 
-三条接口都依赖有效 Session Cookie，写入还要求 `X-Requested-With: price-agent`。所有者 ID 来自会话，不接收客户端提供的用户 ID。响应使用现有 `{code,msg,data}` 信封，不返回完整 Key。设置页可查看账号、保存/替换/移除 Key 与退出登录；当前没有第三方连接测试能力，状态仅表示本地保存情况。
+三处写入接口与这条列表读取都要求 `X-Requested-With: price-agent`（`GET /settings/models/{provider}` 会解密用户 Key，因而按写操作同等对待）。所有接口都依赖有效 Session Cookie。所有者 ID 来自会话，不接收客户端提供的用户 ID。响应使用现有 `{code,msg,data}` 信封，不返回完整 Key。设置页可查看账号、保存/替换/移除 Key 与退出登录；当前没有第三方连接测试能力，状态仅表示本地保存情况。
 
 ## 使用用户自己的模型 API
 
-保存 Key 后，在设置页“咨询使用的模型”选择一个已保存的服务商。选择结果存于 `users.model_provider`；删除正在使用的 Key 会清除选择。当前支持 OpenAI (`gpt-4o-mini`)、Anthropic (`claude-haiku-4-5`)、DeepSeek (`deepseek-chat`) 和通义千问 (`qwen-plus`)。其他服务商的 Key 仍可加密保存，但没有聊天适配器，不能选为咨询模型。
+保存 Key 后，在设置页“咨询使用的模型”选择服务商与模型。服务商存于 `users.model_provider`，模型名存于对应的 `user_api_keys.model_name`，因此每个服务商各记一个，切走再切回仍然保留；删除正在使用的 Key 会连同该服务商的模型选择一起删除（Key 被判 `invalid` 不会清除模型选择）。模型名可留空，留空即使用服务商默认：OpenAI (`gpt-4o-mini`)、Anthropic (`claude-haiku-4-5`)、DeepSeek (`deepseek-chat`)、通义千问 (`qwen-plus`)。可选模型列表由 `GET /settings/models/{provider}` 用该用户自己的 Key 向厂商官方 `models` 端点实时拉取，不缓存；Anthropic 只取一页（`limit=100`，忽略游标），列表里会按命名剔除明显不能对话的模型（embedding、音频、图像、审核等），这是 best-effort——后端不会拿这份列表校验用户保存的模型名，填错的代价是调用时失败。其他服务商的 Key 仍可加密保存，但端点白名单只认上述四家，不能选为咨询模型。
 
-浏览器向 `POST /chat/message` 提交最近最多 12 条文本消息；后端根据 Session 确认用户，只解密该用户选定服务商的 Key，在固定官方 HTTPS 端点调用模型，并只将回复文本返回浏览器。浏览器从不接收 Key。服务商返回 401/403 时，后端用调用前的修订标识将该 Key 标为 `invalid`；替换 Key 后可重新选择。没有选择、Key 缺失或配置错误时明确报错，不回退到前端 Mock 回复。聊天目前仅支持文本，图片、商品搜索、实时价格、库存和优惠券接口尚未接入；模型系统提示禁止声称已查询这些数据。
+浏览器向 `POST /chat/message` 提交最近最多 12 条文本消息；后端根据 Session 确认用户，只解密该用户选定服务商的 Key，在固定官方 HTTPS 端点调用模型，并只将回复文本与实际使用的模型名返回浏览器。浏览器从不接收 Key。服务商返回 401/403 时，后端用调用前的修订标识将该 Key 标为 `invalid`；替换 Key 后可重新选择。两条模型调用（对话与模型列表）都以 `follow_redirects=False` 发出，3xx 一律视为失败，不会跟随重定向。没有选择、Key 缺失或配置错误时明确报错，不回退到前端 Mock 回复，也没有任何服务端全局模型 Key 可作兜底。聊天目前仅支持文本，图片、商品搜索、实时价格、库存和优惠券接口尚未接入；模型系统提示禁止声称已查询这些数据。
 
-新增迁移 `e4a6b8c0d2f1` 为 `users` 增加可空的默认服务商字段。部署时先执行 `alembic upgrade head`，再重启后端。必须先配置本页上方的 KEK 环境变量；用户自己的模型 Key 不能代替服务端 KEK。正式部署还需让 `/auth`、`/settings`、`/chat` 与前端保持同源。
+新增迁移 `e4a6b8c0d2f1` 为 `users` 增加可空的默认服务商字段；`a1c9f4e7b208` 为 `user_api_keys` 增加可空的 `model_name`。后者可空且无 `server_default`，存量行全部为 NULL（含义是“未选择，使用服务商默认”），对已有数据是纯 no-op。部署时先执行 `alembic upgrade head`，再重启后端。必须先配置本页上方的 KEK 环境变量；用户自己的模型 Key 不能代替服务端 KEK。正式部署还需让 `/auth`、`/settings`、`/chat` 与前端保持同源。
 
 ## 内部调用
 
@@ -57,7 +60,7 @@ async with service.key_for_call(authenticated_user_id, "openai", actor="service:
     await call_provider(authorization)
 ```
 
-`key_for_call` 返回可清零的 `bytearray` 及修订标识。上下文退出时缓冲区被覆盖；Python 的字符串和加密库内部副本无法保证彻底擦除，因而应尽量缩短其生存期。不要把明文放进 Redis、ORM、审计日志或返回前端。`list_key_metadata` 仅返回服务商、`****` 加后四位、状态及时间。
+`key_for_call` 返回可清零的 `bytearray`、修订标识，以及同一行上的 `model_name`。模型名是明文列：它不是凭据，用户在设置页要能看见，加密它只会把它拖进 DEK 轮换与 AAD 绑定而毫无收益——本模块“不存明文机密”的规则不适用于它，改动时不要顺手加密。上下文退出时缓冲区被覆盖；Python 的字符串和加密库内部副本无法保证彻底擦除，因而应尽量缩短其生存期。不要把明文放进 Redis、ORM、审计日志或返回前端。`list_key_metadata` 仅返回服务商、`****` 加后四位、已选模型名、状态及时间。`key_for_call(..., purpose=...)` 决定审计日志里的用途字段（`model_call` 或 `model_list`），别让它对新用途说谎。
 
 服务商标识统一小写，每用户每服务商最多一条记录。重复保存会替换旧 Key、产生新修订标识并恢复 `active`。厂商报告凭证失效时，用借用时取得的修订标识调用 `mark_invalid`，避免旧请求把刚换的新 Key 标为失效。`active` 只表示本地允许取用，不代表厂商已验证。
 

@@ -44,12 +44,16 @@ class KeyMetadata:
     status: str
     create_time: datetime.datetime
     update_time: datetime.datetime
+    model_name: str | None
 
 
 @dataclass
 class KeyForCall:
     value: bytearray = field(repr=False)
     revision: str
+    # 随 Key 一起读出的明文选择，不是机密，无需清零。放在同一次读取里返回，
+    # 才能保证「报出去的模型」和「实际发出请求的那把 Key」出自同一行同一时刻。
+    model_name: str | None = None
 
 
 def _utc_now() -> datetime.datetime:
@@ -162,7 +166,7 @@ class ApiKeyService:
         async with self._sessions() as db:
             rows = (await db.scalars(select(UserApiKey).where(UserApiKey.user_id == user_id).order_by(UserApiKey.provider))).all()
         self._audit("list", actor, user_id, None, "success")
-        return [KeyMetadata(row.provider, "****" + row.key_suffix, row.status, row.create_time, row.update_time) for row in rows]
+        return [KeyMetadata(row.provider, "****" + row.key_suffix, row.status, row.create_time, row.update_time, row.model_name) for row in rows]
 
     async def delete_key(self, user_id: int, provider: str, *, actor: str) -> bool:
         _validate_subject(user_id, actor)
@@ -205,7 +209,7 @@ class ApiKeyService:
             raise
 
     @asynccontextmanager
-    async def key_for_call(self, user_id: int, provider: str, *, actor: str) -> AsyncIterator[KeyForCall]:
+    async def key_for_call(self, user_id: int, provider: str, *, actor: str, purpose: str = "model_call") -> AsyncIterator[KeyForCall]:
         _validate_subject(user_id, actor)
         provider = normalize_provider(provider)
         plaintext: bytearray | None = None
@@ -225,11 +229,12 @@ class ApiKeyService:
                     dek = unwrap_dek(self._ring, _envelope_blob(envelope), user_id, envelope.dek_version, envelope.kek_version, envelope.format_version)
                     plaintext = bytearray(decrypt_api_key(dek, _key_blob(key), user_id, provider, key.dek_version, key.format_version))
                     revision = key.revision
-                self._audit("use", actor, user_id, provider, "success", "model_call")
+                    model_name = key.model_name
+                self._audit("use", actor, user_id, provider, "success", purpose)
             except Exception as exc:
                 self._audit("use", actor, user_id, provider, "failed", type(exc).__name__)
                 raise
-            yield KeyForCall(plaintext, revision)
+            yield KeyForCall(plaintext, revision, model_name)
         finally:
             if plaintext is not None:
                 plaintext[:] = b"\x00" * len(plaintext)
