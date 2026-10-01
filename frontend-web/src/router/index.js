@@ -30,7 +30,7 @@ router.afterEach((to) => {
 })
 
 router.beforeEach(async (to) => {
-  if (to.meta.requiresAuth && !(await refreshAuth({ force: true }))) {
+  if (to.meta.requiresAuth && !(await refreshAuth())) {
     return { name: 'auth', query: { redirect: to.fullPath } }
   }
   return true

@@ -43,7 +43,7 @@ async function handleSignOut() {
 </script>
 
 <template>
-  <div class="app-shell flex min-h-dvh flex-col md:flex-row">
+  <div class="flex min-h-dvh flex-col">
     <!-- 键盘用户跳过导航 -->
     <a
       href="#main"
@@ -51,34 +51,34 @@ async function handleSignOut() {
     >
       跳到主要内容
     </a>
-    <header v-if="!isAuthPage" class="app-sidebar z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 md:fixed md:inset-y-0 md:left-0 md:flex md:w-[250px] md:flex-col md:border-b-0 md:border-r">
-      <nav class="app-sidebar__nav mx-auto flex min-h-[4.25rem] w-full items-center gap-3 px-4 py-3 md:flex-1 md:flex-col md:items-stretch md:px-4 md:py-7">
+    <header v-if="!isAuthPage" class="app-header top-0 z-40 backdrop-blur transition-colors">
+      <nav class="app-header__nav mx-auto flex h-[4.5rem] w-full items-center gap-3 px-4 sm:gap-8 sm:px-7 lg:px-9">
         <RouterLink :to="brandTarget" class="app-header__brand group flex shrink-0 items-center gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-white/80 dark:hover:bg-zinc-900/80">
           <span class="app-header__mark flex h-9 w-9 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 shadow-[0_4px_14px_-8px_rgba(37,99,235,.7)] transition-transform group-hover:scale-[1.04] dark:border-blue-900/60 dark:bg-blue-950/60">
             <BrandIcon :size="21" />
           </span>
           <span class="app-header__wordmark text-[15px] font-semibold tracking-tight text-zinc-900 max-[380px]:hidden dark:text-zinc-100"><small>SHOP INTELLIGENCE</small><b>PRICE AGENT</b></span>
         </RouterLink>
-        <div v-if="showFunctionalNav" class="app-header__links ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto md:ml-0 md:mt-12 md:flex-col md:items-stretch md:gap-2 md:overflow-visible md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+        <div v-if="showFunctionalNav" class="app-header__links ml-auto flex min-w-0 items-center justify-end gap-1 overflow-x-auto rounded-2xl border border-zinc-200/80 bg-white/70 p-1 shadow-[0_8px_30px_-24px_rgba(15,23,42,.55)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/70">
           <RouterLink
             v-for="l in links"
             :key="l.to"
             :to="l.to"
             :title="l.label"
             :aria-label="l.label"
-            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl px-2 text-sm transition-all sm:h-auto sm:min-w-0 sm:px-3.5 sm:py-2 md:justify-start md:gap-3 md:px-3 md:py-3"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl px-2 text-sm transition-all sm:h-auto sm:min-w-0 sm:px-3.5 sm:py-2"
             :class="
               route.path === l.to
                 ? 'bg-blue-50 font-medium text-blue-700 shadow-sm dark:bg-blue-950/70 dark:text-blue-300'
                 : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
             "
           >
-            <component :is="l.icon" :size="18" />
+            <component :is="l.icon" class="sm:hidden" :size="18" />
             <span class="hidden sm:inline">{{ l.label }}</span>
           </RouterLink>
           <RouterLink
             to="/chat"
-            class="app-header__cta ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white shadow-[0_6px_16px_-8px_rgba(37,99,235,.9)] transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4 md:ml-0 md:mt-4 md:justify-center md:py-3"
+            class="app-header__cta ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white shadow-[0_6px_16px_-8px_rgba(37,99,235,.9)] transition-transform hover:bg-accent-strong active:scale-[0.98] sm:ml-3 sm:px-4"
           >
             <PhLightning :size="15" weight="bold" />
             <span class="max-[430px]:hidden">开始咨询</span>
@@ -88,7 +88,7 @@ async function handleSignOut() {
             title="退出登录"
             aria-label="退出登录"
             :disabled="signingOut"
-            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100 md:mt-auto md:w-full md:justify-start md:gap-3 md:px-3"
+            class="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
             @click="handleSignOut"
           >
             <PhSignOut :size="18" />
@@ -104,15 +104,15 @@ async function handleSignOut() {
       </nav>
     </header>
 
-    <main id="main" class="min-w-0 flex-1" :class="showFunctionalNav ? 'md:ml-[250px]' : ''">
+    <main id="main" class="flex-1">
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in">
-          <component :is="Component" />
+          <component :is="Component" :key="route.fullPath" />
         </Transition>
       </RouterView>
     </main>
 
-    <footer v-if="route.path !== '/chat' && !isAuthPage" class="border-t border-zinc-200/70 dark:border-zinc-800 md:ml-[250px]">
+    <footer v-if="route.path !== '/chat' && !isAuthPage" class="border-t border-zinc-200/70 dark:border-zinc-800">
       <div class="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 md:flex-row md:items-start md:justify-between">
         <div class="text-[13px] text-zinc-500 dark:text-zinc-400">
           <div class="flex items-center gap-2.5">
