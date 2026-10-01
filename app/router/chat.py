@@ -52,4 +52,4 @@ async def message(payload: ChatInput, user: CurrentUser):
         raise BizError(ErrorCode.PARAM_INVALID, "所选服务商没有可用的 API Key") from None
     except ModelCallError as exc:
         raise BizError(ErrorCode.INTERNAL, str(exc)) from None
-    return success({"content": answer, "provider": provider, "model": MODEL_PROVIDERS[provider]["model"]})
+    return success({"content": answer.content, "provider": provider, "model": answer.model})

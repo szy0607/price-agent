@@ -84,10 +84,18 @@ export function getModelSetting() {
   return apiRequest('/settings/model')
 }
 
-export function setModelSetting(provider) {
+export function listProviderModels(provider) {
+  // 这个 GET 会让后端解密用户自己的 Key、并可能把 Key 标为失效，
+  // 所以显式带上同源写保护头——apiRequest 只在非 GET 时才自动注入它。
+  return apiRequest(`/settings/models/${encodeURIComponent(provider)}`, {
+    headers: { 'X-Requested-With': 'price-agent' },
+  })
+}
+
+export function setModelSetting(provider, modelName = null) {
   return apiRequest('/settings/model', {
     method: 'PUT',
-    body: JSON.stringify({ provider }),
+    body: JSON.stringify({ provider, model_name: modelName }),
   })
 }
 
