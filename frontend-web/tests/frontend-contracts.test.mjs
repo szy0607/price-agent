@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { parse as parseSfc } from 'vue/compiler-sfc'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 
@@ -93,4 +94,22 @@ test('the model select always offers the saved choice and the provider default',
   assert.match(choices[0], /（服务商默认）/)
   // 提交条件必须同时比对厂商和模型，否则「同一厂商换个模型」这个主场景会是禁用状态
   assert.match(source, /selectedModelProvider === modelSetting\.provider && selectedModelName === storedModelName/)
+})
+
+test('every route view keeps a single element root so the page transition can animate it', async () => {
+  const router = await read('src/router/index.js')
+  const viewNames = [...router.matchAll(/import\('\.\.\/views\/([A-Za-z]+\.vue)'\)/g)].map((m) => m[1])
+  assert.ok(viewNames.length >= 10, `router 里只找到 ${viewNames.length} 个懒加载视图`)
+
+  for (const name of new Set(viewNames)) {
+    const { descriptor, errors } = parseSfc(await read(`src/views/${name}`), { filename: name })
+    assert.deepEqual(errors, [], `${name} 模板解析失败`)
+    const roots = (descriptor.template?.ast?.children ?? []).filter(
+      (node) => node.type === 1 || node.type === 5 || node.type === 8 || (node.type === 2 && node.value.trim()),
+    )
+    // App.vue 用 <Transition mode="out-in"> 包 RouterView：多根组件会渲染成 Fragment，
+    // leave 回调永不完成，切页后 <main> 会一直空白，只能整页刷新才恢复。
+    assert.equal(roots.length, 1, `${name} 有 ${roots.length} 个根节点，路由过渡会卡死`)
+    assert.equal(roots[0].type, 1, `${name} 的根节点不是元素`)
+  }
 })
