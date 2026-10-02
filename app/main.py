@@ -6,6 +6,7 @@ from app.router.health import health_router
 from app.router.log_in import auth_router
 from app.router.settings import settings_router
 from app.router.chat import chat_router
+from app.router.purchase_record import purchase_router
 from contextlib import asynccontextmanager
 import logging
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +26,7 @@ app.add_middleware(TraceMiddleware)
 app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(chat_router)
+app.include_router(purchase_router)
 app.include_router(health_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

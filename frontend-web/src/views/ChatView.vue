@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { PhChatsCircle, PhCpu, PhGearSix, PhPaperPlaneRight, PhPlus } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { getModelSetting, sendChatMessage } from '../utils/api'
+import { getModelSetting, listPurchaseRecords, sendChatMessage } from '../utils/api'
 import { loadRecords } from '../utils/parameterRecords'
 
 let nextId = 1
@@ -16,6 +16,9 @@ const sending = ref(false)
 const listRef = ref(null)
 const modelSetting = ref({ provider: null, options: [] })
 const contextItems = ref([])
+// 消费记录只留 id，商品名和价格由后端按登录用户反查；这里再取一次名字只为把提示条显示全
+const contextRecordIds = ref([])
+const contextRecords = ref([])
 const activeModel = computed(() => modelSetting.value.options.find((item) => item.provider === modelSetting.value.provider))
 const modelSummary = computed(() => {
   if (!activeModel.value) return { label: '尚未选择模型', detail: '前往设置完成配置' }
@@ -58,7 +61,7 @@ async function send() {
     const messages = session.messages.slice(-12).map((message) => ({
       role: message.role, content: message.text,
     }))
-    const result = await sendChatMessage(messages)
+    const result = await sendChatMessage(messages, contextRecordIds.value)
     session.messages.push({ id: nextId++, role: 'assistant', text: result.content })
   } catch (error) {
     session.error = error.message || '咨询失败，请稍后重试。'
@@ -71,6 +74,19 @@ async function send() {
 onMounted(async () => {
   const contextIds = new URLSearchParams(window.location.search).get('items')
   if (contextIds) contextItems.value = loadRecords().filter((item) => contextIds.split(',').includes(item.id))
+  const recordIds = [...new Set((new URLSearchParams(window.location.search).get('records') || '')
+    .split(',').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].slice(0, 10)
+  if (recordIds.length) {
+    try {
+      const all = await listPurchaseRecords()
+      // 只保留查得到的 id：后端对越权或已删除的 id 是整条请求报错，这里先剔掉免得每次发送都 400
+      contextRecords.value = recordIds.map((id) => all.find((item) => item.id === id)).filter(Boolean)
+      contextRecordIds.value = contextRecords.value.map((item) => item.id)
+    } catch {
+      contextRecordIds.value = []
+      contextRecords.value = []
+    }
+  }
   try {
     modelSetting.value = await getModelSetting()
   } catch {
@@ -122,6 +138,8 @@ onMounted(async () => {
 
       <div ref="listRef" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-7">
         <div v-if="contextItems.length" class="mx-auto mb-5 flex max-w-3xl items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"><PhCpu :size="14" /><span>已带入 {{ contextItems.length }} 件商品参数：{{ contextItems.map((item) => item.name).join('、') }}</span></div>
+        <div v-if="contextRecords.length" class="mx-auto mb-3 flex max-w-3xl items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"><PhCpu :size="14" /><span>已带入 {{ contextRecords.length }} 条消费记录：{{ contextRecords.map((item) => item.name).join('、') }}（同时附上你的消费概况）</span></div>
+        <div v-else-if="!activeSession.messages.length" class="mx-auto mb-5 flex max-w-3xl items-center gap-2 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400"><PhCpu :size="14" /><span>咨询时会带上你的消费概况，用于按你的使用场景作答。<RouterLink to="/spending" class="font-medium text-accent underline">消费记录</RouterLink></span></div>
         <div v-if="!activeSession.messages.length" class="mx-auto flex h-full max-w-lg flex-col items-center justify-center text-center">
           <BrandIcon :size="35" class="text-accent" />
           <h2 class="mt-5 text-xl font-semibold text-zinc-950 dark:text-white">开始咨询</h2>

@@ -149,8 +149,24 @@ async def list_user_models(user_id: int, provider: str, ring: KeyRing) -> list[d
             token = ""
 
 
-async def answer_with_user_key(user_id: int, provider: str, messages: list[dict[str, str]], ring: KeyRing) -> ModelAnswer:
+_CONTEXT_LEAD = (
+    "\n\n【用户消费记录】以下是该用户自行录入或确认过的历史消费信息，"
+    "只用于理解他的使用场景和偏好；它们不是实时价格、库存或优惠，"
+    "不要复述成当前报价，也不要据此声称查询过任何平台。\n"
+)
+
+
+def _system_prompt_with(extra_context: str) -> str:
+    """SYSTEM_PROMPT 原文打头，消费记录追加在后 —— 红线那句一个字都不动。"""
+    text = " ".join(extra_context.split()) if extra_context else ""
+    if not text:
+        return SYSTEM_PROMPT
+    return f"{SYSTEM_PROMPT}{_CONTEXT_LEAD}{text[:4000]}"
+
+
+async def answer_with_user_key(user_id: int, provider: str, messages: list[dict[str, str]], ring: KeyRing, extra_context: str = "") -> ModelAnswer:
     config = MODEL_PROVIDERS[provider]
+    system_prompt = _system_prompt_with(extra_context)
     service = ApiKeyService(async_session_local, ring)
     async with service.key_for_call(user_id, provider, actor="service:chat") as borrowed:
         model = resolve_model_name(provider, borrowed.model_name)
@@ -159,9 +175,9 @@ async def answer_with_user_key(user_id: int, provider: str, messages: list[dict[
         headers = _headers_for(provider, token)
         try:
             if provider == "anthropic":
-                body = {"model": model, "max_tokens": 1024, "system": SYSTEM_PROMPT, "messages": messages}
+                body = {"model": model, "max_tokens": 1024, "system": system_prompt, "messages": messages}
             else:
-                body = {"model": model, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages], "max_tokens": 1024, "stream": False}
+                body = {"model": model, "messages": [{"role": "system", "content": system_prompt}, *messages], "max_tokens": 1024, "stream": False}
             async with httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=8.0), follow_redirects=False) as client:
                 response = await client.post(
                     config["url"],

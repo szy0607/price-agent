@@ -99,9 +99,37 @@ export function setModelSetting(provider, modelName = null) {
   })
 }
 
-export function sendChatMessage(messages) {
+export function sendChatMessage(messages, recordIds = []) {
+  // record_ids 只当索引用，商品名和价格由后端按登录用户反查展开，前端改不动。
   return apiRequest('/chat/message', {
     method: 'POST',
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, record_ids: recordIds }),
+  })
+}
+
+export function listPurchaseRecords() {
+  return apiRequest('/purchase-records')
+}
+
+export function createPurchaseRecord(record) {
+  return apiRequest('/purchase-records', { method: 'POST', body: JSON.stringify(record) })
+}
+
+export function updatePurchaseRecord(id, record) {
+  return apiRequest(`/purchase-records/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(record),
+  })
+}
+
+export function deletePurchaseRecord(id) {
+  return apiRequest(`/purchase-records/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// 抓页面只出草稿，用户确认后再调 createPurchaseRecord 落库；POST 的同源头由 apiRequest 注入。
+export function previewPurchaseLink(productUrl) {
+  return apiRequest('/purchase-records/link-preview', {
+    method: 'POST',
+    body: JSON.stringify({ product_url: productUrl }),
   })
 }
