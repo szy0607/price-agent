@@ -2,7 +2,7 @@ from typing import Annotated, AsyncGenerator
 from fastapi import Response, Cookie, Depends, Request
 from sqlalchemy import select
 from app.core.time import get_current_time
-from app.core.cookie import SESSION_TOKEN_NAME, SESSION_TTL_SECONDS, set_session_token, RENEW_THRESHOLD, SESSION_TTL
+from app.core.cookie import SESSION_TOKEN_NAME, set_session_token, RENEW_THRESHOLD, SESSION_TTL
 from app.core.errors import BizError, ErrorCode
 from app.core.security import hash_session_token
 from app.database.session import async_session_local

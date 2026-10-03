@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import TraceMiddleware
+from app.router.cartitem_router import cart_router
 from app.router.health import health_router
 from app.router.log_in import auth_router
 from app.router.settings import settings_router
@@ -28,6 +29,8 @@ app.include_router(settings_router)
 app.include_router(chat_router)
 app.include_router(purchase_router)
 app.include_router(health_router)
+app.include_router(cart_router)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
