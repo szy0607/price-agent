@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800" font-family="system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif">
+  <!--
+    Price Agent 商品占位图（无图时的替代展示）
+    主题对齐 frontend-web/src/style.css：
+    - 唯一强调色电光蓝 #2563eb / 软蓝 #eff4ff（暗色下用亮蓝 #60a5fa）
+    - 背景浅灰白渐变，呼应 zinc-50 + vertex-stage
+    - 图标：购物袋 + ¥ 价格标签，呼应「价格助手」定位
+    - 内置 prefers-color-scheme 明暗双模式，一张图通吃
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/>
+      <stop offset="1" stop-color="#eef4fb"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.55">
+      <stop offset="0" stop-color="#2563eb" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#2563eb" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" class="grid-line" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <style>
+    .grid-line { stroke: #2563eb; stroke-opacity: 0.045; }
+    .dot { fill: #2563eb; }
+    .bag-fill { fill: #eff4ff; }
+    .bag-line { stroke: #2563eb; }
+    .tag-fill { fill: #ffffff; }
+    .tag-line { stroke: #2563eb; }
+    .tag-text { fill: #2563eb; }
+    .text-main { fill: #475569; }
+    .text-sub { fill: #94a3b8; }
+    @media (prefers-color-scheme: dark) {
+      .grid-line { stroke: #60a5fa; stroke-opacity: 0.07; }
+      .dot { fill: #60a5fa; }
+      .bag-fill { fill: rgba(59, 130, 246, 0.16); }
+      .bag-line { stroke: #60a5fa; }
+      .tag-fill { fill: #1e293b; }
+      .tag-line { stroke: #60a5fa; }
+      .tag-text { fill: #60a5fa; }
+      .text-main { fill: #cbd5e1; }
+      .text-sub { fill: #64748b; }
+    }
+  </style>
+
+  <!-- 背景 -->
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <rect width="800" height="800" fill="url(#glow)"/>
+  <rect width="800" height="800" fill="url(#grid)"/>
+
+  <!-- 极简装饰点 -->
+  <circle class="dot" opacity="0.10" cx="132" cy="168" r="6"/>
+  <circle class="dot" opacity="0.14" cx="672" cy="150" r="4"/>
+  <circle class="dot" opacity="0.08" cx="664" cy="648" r="10"/>
+  <circle class="dot" opacity="0.12" cx="122" cy="626" r="4"/>
+
+  <!-- 购物袋 + 价格标签 -->
+  <g transform="translate(0,-26)">
+    <!-- 提手 -->
+    <path class="bag-line" d="M 348 374 v -32 a 52 52 0 0 1 104 0 v 32" fill="none" stroke-width="8" stroke-linecap="round"/>
+    <!-- 袋身：微梯形 + 大圆角底（经典购物袋轮廓） -->
+    <path class="bag-fill" d="M 303 372 L 318 514 Q 321 548 355 548 L 445 548 Q 479 548 482 514 L 497 372 Z" stroke-width="8"/>
+    <!-- 价格标签 -->
+    <rect class="tag-fill" x="342" y="402" width="116" height="70" rx="12" stroke-width="6"/>
+    <circle class="dot" cx="366" cy="437" r="10" opacity="0.9"/>
+    <text class="tag-text" x="450" y="459" text-anchor="middle" font-size="40" font-weight="700">¥</text>
+  </g>
+
+  <!-- 文案 -->
+  <text class="text-main" x="400" y="618" text-anchor="middle" font-size="30" font-weight="600">暂无图片</text>
+  <text class="text-sub" x="400" y="664" text-anchor="middle" font-size="19" letter-spacing="3">图片上传后自动展示</text>
+</svg>

@@ -28,6 +28,107 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Shared interaction language for controls and framed content. */
+button {
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 16px -12px rgba(15, 23, 42, 0.65);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Full-width resource lists and bordered row actions. */
+.mx-auto.max-w-6xl {
+  max-width: none;
+}
+
+article.rounded-xl > div > div:last-child button,
+article.rounded-2xl > div > div:last-child button,
+article.rounded-xl > div:last-child button,
+article.rounded-2xl > div:last-child button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+article.rounded-xl > div > div:last-child button:hover,
+article.rounded-2xl > div > div:last-child button:hover,
+article.rounded-xl > div:last-child button:hover,
+article.rounded-2xl > div:last-child button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* Existing rounded content blocks become consistent, interactive cards. */
+div.rounded-xl.border,
+div.rounded-2xl.border,
+article.rounded-xl,
+article.rounded-2xl,
+aside.rounded-xl,
+aside.rounded-2xl {
+  border-width: 1px;
+  border-style: solid;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+div.rounded-xl.border:hover,
+div.rounded-2xl.border:hover,
+article.rounded-xl:hover,
+article.rounded-2xl:hover,
+aside.rounded-xl:hover,
+aside.rounded-2xl:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.65);
+}
+
+/* List records are individual cards with a clear action footer. */
+article.rounded-xl,
+article.rounded-2xl {
+  border-color: #d9e0ea;
+  box-shadow: 0 4px 14px -12px rgba(15, 23, 42, 0.55);
+}
+
+article.rounded-xl > div > div:last-child,
+article.rounded-2xl > div > div:last-child {
+  border-top: 1px solid #edf0f5;
+  padding-top: 0.75rem;
+}
+
+.dark article.rounded-xl,
+.dark article.rounded-2xl {
+  border-color: #272f3d;
+}
+
+.dark article.rounded-xl > div > div:last-child,
+.dark article.rounded-2xl > div > div:last-child {
+  border-color: #272f3d;
+}
+
 /* 圆角规范：卡片 16px、按钮/输入 10px、小标签 6px，全站统一 */
 /* 进场动效：仅 transform/opacity，尊重 prefers-reduced-motion */
 .reveal {
@@ -45,6 +146,16 @@ body {
   .reveal {
     opacity: 1;
     transform: none;
+    transition: none;
+  }
+
+  button,
+  div.rounded-xl.border,
+  div.rounded-2xl.border,
+  article.rounded-xl,
+  article.rounded-2xl,
+  aside.rounded-xl,
+  aside.rounded-2xl {
     transition: none;
   }
 }

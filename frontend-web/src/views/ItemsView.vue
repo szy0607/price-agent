@@ -1,59 +1,28 @@
 <script setup>
-import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
-import { PhArchive, PhArrowLeft, PhArrowRight, PhCheck, PhPlus, PhX } from '@phosphor-icons/vue'
-import { createRecord, loadRecords, saveRecords, subscribeRecords } from '../utils/parameterRecords'
-
-const records = ref([])
-const showForm = ref(false)
-const form = reactive({ name: '', brand: '', model: '', category: '', note: '' })
-const items = computed(() => records.value.filter((record) => record.scope === 'items'))
-const recentItems = computed(() => [...items.value].sort((a, b) => new Date(b.purchasedAt || b.updatedAt || 0) - new Date(a.purchasedAt || a.updatedAt || 0)).slice(0, 5))
-const recentActive = ref(0)
-const selectedItem = ref(null)
-function carouselOffset(index) {
-  const total = recentItems.value.length
-  if (!total) return 0
-  let offset = (index - recentActive.value + total) % total
-  if (offset > total / 2) offset -= total
-  return offset
-}
-function carouselStyle(index) {
-  const offset = carouselOffset(index)
-  const distance = Math.abs(offset)
-  return {
-    '--carousel-offset': offset,
-    '--carousel-depth': Math.max(0, 3 - distance),
-    '--carousel-scale': distance === 0 ? 1 : distance === 1 ? 0.82 : 0.68,
-    '--carousel-opacity': distance > 2 ? 0 : distance === 2 ? 0.58 : 0.86,
-    zIndex: 10 - distance,
-  }
-}
-function moveRecent(direction) {
-  const total = recentItems.value.length
-  if (total) recentActive.value = (recentActive.value + direction + total) % total
-}
-function selectRecent(index) {
-  if (index !== recentActive.value) recentActive.value = index
-  else selectedItem.value = recentItems.value[index]
-}
-function closeItemDetail() { selectedItem.value = null }
-function refresh() { records.value = loadRecords() }
-function reset() { Object.assign(form, { name: '', brand: '', model: '', category: '', note: '' }); showForm.value = false }
-function addItem() {
-  if (!form.name.trim()) return
-  const next = createRecord({ ...form, specs: form.note ? { 备注: form.note } : {}, source: '手动建档' }, 'items')
-  saveRecords([...records.value, next])
-  reset()
-}
-onMounted(() => { refresh(); window._itemsRecordsCleanup = subscribeRecords(refresh) })
-onBeforeUnmount(() => { window._itemsRecordsCleanup?.(); delete window._itemsRecordsCleanup })
+import { onMounted, reactive, ref } from 'vue'
+import { PhArchive, PhCheck, PhPlus, PhTrash, PhX } from '@phosphor-icons/vue'
+import { createOwnedItem, deleteOwnedItem, listOwnedItems, updateOwnedItem } from '../utils/api'
+const items = ref([]); const loading = ref(true); const saving = ref(false); const editingId = ref(null); const showForm = ref(false); const toast = ref('')
+const form = reactive({ name: '', category: '', price: '', specsText: '', image: '', note: '', platform: '', purchasedAt: '' })
+const placeholderImage = `${import.meta.env.BASE_URL}images/placeholder-item.png`
+function notify(message) { toast.value = message; window.setTimeout(() => { toast.value = '' }, 2600) }
+function specsFromText(text) { return Object.fromEntries(text.split('\n').map((line) => line.split(/[:：]/)).filter(([k, v]) => k?.trim() && v?.trim()).map(([k, ...v]) => [k.trim(), v.join(':').trim()])) }
+function specsText(specs) { return Object.entries(specs || {}).map(([k, v]) => `${k}: ${v}`).join('\n') }
+function imageFallback(event) { event.target.src = placeholderImage }
+function validImageUrl(value) { if (!value) return true; try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' } catch { return false } }
+function resetForm() { editingId.value = null; Object.assign(form, { name: '', category: '', price: '', specsText: '', image: '', note: '', platform: '', purchasedAt: '' }); showForm.value = true }
+function closeForm() { if (!saving.value) showForm.value = false }
+function edit(item) { editingId.value = item.id; Object.assign(form, { name: item.name, category: item.category || '', price: item.price ?? '', specsText: specsText(item.specs), image: item.image || '', note: item.note || '', platform: item.platform || '', purchasedAt: item.purchased_at ? String(item.purchased_at).slice(0, 10) : '' }); showForm.value = true }
+async function refresh() { loading.value = true; try { items.value = await listOwnedItems() } catch (error) { notify(error.message || '物品库读取失败') } finally { loading.value = false } }
+async function save() { if (!form.name.trim() || saving.value) return; if (form.image.trim() && !validImageUrl(form.image.trim())) { notify('图片地址必须是 http:// 或 https:// 链接'); return } saving.value = true; const payload = { name: form.name.trim(), category: form.category.trim() || '其他', price: form.price === '' ? null : Number(form.price), specs: specsFromText(form.specsText), image: form.image.trim() || null, note: form.note.trim() || null, platform: form.platform.trim() || null, purchased_at: form.purchasedAt || null }; try { if (editingId.value) await updateOwnedItem(editingId.value, payload); else await createOwnedItem(payload); showForm.value = false; editingId.value = null; await refresh(); notify('已保存') } catch (error) { notify(error.message || '保存失败') } finally { saving.value = false } }
+async function remove(item) { try { await deleteOwnedItem(item.id); await refresh(); notify('已删除') } catch (error) { notify(error.message || '删除失败') } }
+onMounted(refresh)
 </script>
-
 <template>
-  <div class="min-h-[calc(100dvh-4.5rem)] bg-zinc-50 dark:bg-zinc-950"><div class="mx-auto max-w-none px-5 pb-20 pt-9 sm:px-8 sm:pt-12"><div class="flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-7 dark:border-zinc-800"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Personal archive</p><h1 class="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">物品库</h1><p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">已购买和正在使用的物品参数档案，可随时补充备注。</p></div><button type="button" class="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-3.5 text-sm font-medium text-white shadow-sm hover:bg-accent-strong" @click="showForm = true"><PhPlus :size="17" weight="bold" />直接建档</button></div>
-    <section v-if="recentItems.length" class="recent-items-showcase" aria-labelledby="recent-items-title"><div class="recent-items-copy"><p id="recent-items-title" class="recent-items-label">最近买过</p></div><div class="recent-items-carousel"><button type="button" class="recent-items-arrow recent-items-arrow--prev" aria-label="上一件最近购买" @click="moveRecent(-1)"><PhArrowLeft :size="19" weight="bold" /></button><div class="recent-items-stage"><button v-for="(item, index) in recentItems" :key="item.id" type="button" class="recent-item-card" :style="carouselStyle(index)" :aria-label="`${index === recentActive ? '查看' : '切换到'} ${item.name}`" @click="selectRecent(index)"><span class="recent-item-card__shine"></span><img :src="item.image" :alt="item.name" /><div><small>{{ item.category }} · {{ item.brand }}</small><strong>{{ item.name }}</strong><em>{{ item.purchasedAt || '最近更新' }}</em></div></button></div><button type="button" class="recent-items-arrow recent-items-arrow--next" aria-label="下一件最近购买" @click="moveRecent(1)"><PhArrowRight :size="19" weight="bold" /></button></div></section>
-    <div v-if="showForm" class="mt-6 rounded-2xl border border-blue-200 bg-blue-50/60 p-5 dark:border-blue-900/70 dark:bg-blue-950/25"><div class="flex items-center justify-between"><h2 class="font-semibold text-zinc-900 dark:text-white">为已有物品建档</h2><button type="button" title="关闭" aria-label="关闭" class="text-zinc-500" @click="reset"><PhX :size="18" /></button></div><form class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="addItem"><input v-model="form.name" required placeholder="物品名称 *" class="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" /><input v-model="form.brand" placeholder="品牌" class="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" /><input v-model="form.model" placeholder="型号" class="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" /><input v-model="form.category" placeholder="品类" class="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" /><input v-model="form.note" placeholder="备注（可选）" class="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm sm:col-span-2 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" /><button type="submit" class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-white sm:col-span-2"><PhCheck :size="16" />保存物品档案</button></form></div>
-    <div v-if="!items.length" class="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-16 text-center dark:border-zinc-700 dark:bg-zinc-900"><PhArchive :size="30" class="mx-auto text-zinc-400" /><p class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">还没有物品档案</p></div><div v-else class="mt-8 grid gap-4 md:grid-cols-3 xl:grid-cols-4"><article v-for="item in items" :key="item.id" class="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"><div class="flex gap-4"><img :src="item.image" alt="" class="h-20 w-20 rounded-xl object-cover" /><div class="min-w-0"><p class="text-xs text-zinc-500">{{ item.category }} · {{ item.brand }}</p><h2 class="mt-1 truncate font-semibold text-zinc-900 dark:text-white">{{ item.name }}</h2><p class="mt-1 text-xs text-zinc-500">{{ item.model }}</p></div></div><div class="mt-4 border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"><span>建档来源：{{ item.source }}</span><span v-if="item.purchasedAt" class="ml-4">购买日期：{{ item.purchasedAt }}</span></div><div class="mt-3 flex flex-wrap gap-1.5"><span v-for="(value, key) in item.specs" :key="key" class="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{{ key }} {{ value }}</span></div></article></div></div>
-    <div v-if="selectedItem" class="item-detail-modal" role="dialog" aria-modal="true" :aria-label="selectedItem.name" @click.self="closeItemDetail" @keydown.esc="closeItemDetail"><div class="item-detail-dialog"><button type="button" class="item-detail-close" aria-label="关闭参数详情" title="关闭" @click="closeItemDetail"><PhX :size="19" /></button><div class="item-detail-head"><img :src="selectedItem.image" :alt="selectedItem.name" /><div><p>{{ selectedItem.category }} · {{ selectedItem.brand }}</p><h2>{{ selectedItem.name }}</h2><span>{{ selectedItem.model }}</span></div></div><div class="item-detail-meta"><span>建档来源：{{ selectedItem.source }}</span><span v-if="selectedItem.purchasedAt">购买日期：{{ selectedItem.purchasedAt }}</span></div><div class="item-detail-specs"><div v-for="(value, key) in selectedItem.specs" :key="key"><small>{{ key }}</small><strong>{{ value }}</strong></div></div></div></div>
-  </div>
+  <div class="min-h-[calc(100dvh-4.5rem)] bg-zinc-50 dark:bg-zinc-950"><div class="mx-auto max-w-6xl px-5 pb-20 pt-9 sm:px-8 sm:pt-12">
+    <div class="flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-7 dark:border-zinc-800"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Owned items</p><h1 class="mt-2 text-2xl font-semibold text-zinc-950 dark:text-white">物品库</h1><p class="mt-2 text-sm text-zinc-500">管理已购买并正在使用的物品参数档案。</p></div><button type="button" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-white" @click="resetForm"><PhPlus :size="17" />新增物品</button></div>
+    <div class="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]"><section><div v-if="loading" class="rounded-xl border bg-white px-6 py-16 text-center text-sm text-zinc-500">正在读取…</div><div v-else-if="!items.length" class="rounded-xl border border-dashed bg-white px-6 py-16 text-center dark:bg-zinc-900"><PhArchive :size="30" class="mx-auto text-zinc-400" /><p class="mt-3 text-sm text-zinc-500">还没有物品档案</p></div><div v-else class="grid gap-3 sm:grid-cols-2"><article v-for="item in items" :key="item.id" class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"><div class="flex gap-3"><img :src="item.image || placeholderImage" :alt="item.name" class="h-16 w-16 rounded-lg object-cover" @error="imageFallback" /><div class="min-w-0 flex-1"><p class="text-xs text-zinc-500">{{ item.category }}{{ item.platform ? ` · ${item.platform}` : '' }}</p><h2 class="mt-1 truncate font-semibold text-zinc-900 dark:text-white">{{ item.name }}</h2><p v-if="item.purchased_at" class="mt-1 text-xs text-zinc-500">购买于 {{ item.purchased_at }}</p></div></div><div v-if="Object.keys(item.specs || {}).length" class="mt-3 flex flex-wrap gap-1.5"><span v-for="(value, key) in item.specs" :key="key" class="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{{ key }} {{ value }}</span></div><p v-if="item.note" class="mt-2 text-xs text-zinc-500">{{ item.note }}</p><div class="mt-3 flex gap-3 text-xs"><button type="button" class="text-accent" @click="edit(item)">编辑</button><button type="button" class="text-red-600" @click="remove(item)"><PhTrash :size="14" class="inline" /> 删除</button></div></article></div></section>
+      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 px-4" role="dialog" aria-modal="true" @click.self="closeForm" @keydown.esc="closeForm"><div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"><div class="flex items-center justify-between"><h2 class="font-semibold">{{ editingId ? '编辑物品' : '新增物品' }}</h2><button type="button" aria-label="关闭" title="关闭" @click="closeForm"><PhX :size="17" /></button></div><form class="mt-5 space-y-3" @submit.prevent="save"><input v-model="form.name" required maxlength="256" placeholder="物品名称" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><input v-model="form.category" maxlength="64" placeholder="分类" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><div class="grid grid-cols-2 gap-3"><input v-model="form.price" type="number" min="0" step="0.01" placeholder="价格" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><input v-model="form.platform" maxlength="64" placeholder="平台" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /></div><input v-model="form.purchasedAt" type="date" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><textarea v-model="form.specsText" rows="4" placeholder="规格，每行一条：颜色: 黑色" class="w-full rounded-lg border px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><div class="flex items-center gap-3 rounded-lg border border-dashed border-zinc-300 p-2 dark:border-zinc-700"><img :src="form.image || placeholderImage" alt="图片预览" class="h-14 w-14 rounded-md object-cover" @error="imageFallback" /><input v-model="form.image" type="url" pattern="https?://.*" maxlength="512" placeholder="图片链接（可选）" title="请输入 http:// 或 https:// 图片地址" class="h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /></div><textarea v-model="form.note" rows="2" maxlength="512" placeholder="备注" class="w-full rounded-lg border px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><button type="submit" :disabled="saving" class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-white disabled:opacity-50"><PhCheck :size="16" />{{ saving ? '保存中…' : '保存' }}</button></form></div></div></div>
+    <p v-if="toast" class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white" role="status">{{ toast }}</p>
+  </div></div>
 </template>

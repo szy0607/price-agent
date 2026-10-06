@@ -16,6 +16,7 @@ const selectedIds = ref([])
 const loading = ref(true)
 const busy = ref(false)
 const editingId = ref(null)
+const showForm = ref(false)
 const toast = ref('')
 const draftHint = ref('')
 const form = reactive({ name: '', productUrl: '', platform: '', price: '', specsText: '', purchasedAt: '', note: '' })
@@ -93,6 +94,7 @@ function resetForm() {
   editingId.value = null
   draftHint.value = ''
   Object.assign(form, emptyForm)
+  showForm.value = true
 }
 
 function startEdit(item) {
@@ -107,6 +109,7 @@ function startEdit(item) {
     purchasedAt: utcToLocalInput(item.purchased_at),
     note: item.note || '',
   })
+  showForm.value = true
 }
 
 // 只填表单，不落库：抓回来的内容是「待确认草稿」，按下保存才算用户确认过。
@@ -142,7 +145,9 @@ async function save() {
       await createPurchaseRecord(payload)
       notify('已记录这条消费')
     }
-    resetForm()
+    showForm.value = false
+    editingId.value = null
+    Object.assign(form, emptyForm)
     await refresh()
   } catch (error) {
     notify(error.message || '保存失败')
@@ -178,7 +183,8 @@ onMounted(refresh)
           <h1 class="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">消费记录</h1>
           <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">自己记买过什么：商品名、链接、价格、平台、规格、购买时间。价格是当时记录值，不校验现价。</p>
         </div>
-        <div class="flex items-end gap-6">
+        <div class="flex items-end gap-4">
+          <button type="button" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-white" @click="resetForm"><PhPlus :size="17" />新增记录</button>
           <div class="text-right"><p class="text-xs text-zinc-500">已填价格</p><p class="mt-1 text-lg font-semibold text-zinc-900 dark:text-white">{{ priced.length }} 条</p></div>
           <div class="text-right"><p class="text-xs text-zinc-500">合计</p><p class="mt-1 text-lg font-semibold text-zinc-900 dark:text-white">{{ totalSpent.toFixed(2) }} 元</p></div>
         </div>
@@ -195,7 +201,7 @@ onMounted(refresh)
           <div v-else-if="!records.length" class="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-16 text-center dark:border-zinc-700 dark:bg-zinc-900">
             <PhShoppingCart :size="30" class="mx-auto text-zinc-400" />
             <p class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">还没有消费记录</p>
-            <p class="mt-1 text-sm text-zinc-500">在右侧粘贴商品链接，识别或手填都行。</p>
+            <p class="mt-1 text-sm text-zinc-500">点击“新增记录”后填写。</p>
           </div>
           <div v-else class="space-y-3">
             <article v-for="item in records" :key="item.id" class="flex gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-[0_8px_24px_-24px_rgba(15,23,42,.5)] dark:border-zinc-800 dark:bg-zinc-900">
@@ -222,10 +228,11 @@ onMounted(refresh)
           </div>
         </section>
 
-        <aside class="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 px-4" role="dialog" aria-modal="true" @click.self="showForm = false" @keydown.esc="showForm = false">
+        <aside class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
           <div class="flex items-center justify-between gap-2">
             <h2 class="font-semibold text-zinc-900 dark:text-white">{{ editingId ? '编辑记录' : '新增记录' }}</h2>
-            <button v-if="editingId" type="button" class="text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" title="取消编辑" aria-label="取消编辑" @click="resetForm"><PhX :size="17" /></button>
+            <button type="button" class="text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" title="关闭" aria-label="关闭" @click="showForm = false"><PhX :size="17" /></button>
           </div>
           <p class="mt-2 text-sm leading-6 text-zinc-500">链接识别只生成草稿，保存前你可以改任何一项。</p>
 
@@ -255,7 +262,7 @@ onMounted(refresh)
               <PhPlus v-if="!editingId" :size="16" weight="bold" /><PhCheck v-else :size="16" />{{ editingId ? '保存修改' : '添加消费记录' }}
             </button>
           </form>
-        </aside>
+        </aside></div>
       </div>
 
       <p v-if="toast" class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-xl" role="status">{{ toast }}</p>

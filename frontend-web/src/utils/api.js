@@ -133,3 +133,48 @@ export function previewPurchaseLink(productUrl) {
     body: JSON.stringify({ product_url: productUrl }),
   })
 }
+
+export function listCartItems() {
+  return apiRequest('/cart/items')
+}
+
+export function createCartItem(item) {
+  return apiRequest('/cart/items', { method: 'POST', body: JSON.stringify(item) })
+}
+
+export function updateCartItem(id, item) {
+  return apiRequest(`/cart/items/${encodeURIComponent(id)}/update`, {
+    method: 'PATCH',
+    body: JSON.stringify(item),
+  })
+}
+
+export function deleteCartItem(id) {
+  return apiRequest(`/cart/items/${encodeURIComponent(id)}/delete`, { method: 'DELETE' })
+}
+
+export function transferCartItem(id, purchase = {}) {
+  return apiRequest(`/cart/items/${encodeURIComponent(id)}/transform`, {
+    method: 'POST',
+    body: JSON.stringify(purchase),
+  })
+}
+
+export function listOwnedItems() {
+  return apiRequest('/items')
+}
+
+export function createOwnedItem(item) {
+  return apiRequest('/items', { method: 'POST', body: JSON.stringify(item) })
+}
+
+export function updateOwnedItem(id, item) {
+  return apiRequest(`/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(item),
+  })
+}
+
+export function deleteOwnedItem(id) {
+  return apiRequest(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
