@@ -4,6 +4,8 @@ from .user_session import UserSession
 from .cartitem import CartItem
 from .owned_item import OwnedItem
 from .purchase_record import PurchaseRecord
+from .chat_message import ChatMessage
+from .user_profile import UserProfile
 __all__ = [
     "User",
     "UserApiKey",
@@ -12,4 +14,6 @@ __all__ = [
     "CartItem",
     "OwnedItem",
     "PurchaseRecord",
+    "ChatMessage",
+    "UserProfile",
 ]
