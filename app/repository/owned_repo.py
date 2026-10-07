@@ -47,3 +47,11 @@ async def update_owned_item(update_in: OwnedItemUpdateSchema, user_id: int, item
     await session.commit()
     await session.refresh(item)
     return item
+# 获取用户最新购买的物品（未写router）
+async def get_latest_owned_item(user_id: int, session: AsyncSession) -> list[OwnedItem]:
+    result = await session.scalars(
+        select(OwnedItem)
+        .where(OwnedItem.user_id == user_id)
+        .order_by(OwnedItem.purchased_at.desc(), OwnedItem.create_time.desc())
+    )
+    return list(result.all())
