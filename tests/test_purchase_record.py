@@ -1,17 +1,15 @@
 """消费记录测试。
 
-纯函数部分任何环境都能跑；HTTP 与聊天注入部分需要一台已 `alembic upgrade head` 的一次性 MySQL：
+纯函数部分任何环境都能跑；HTTP 集成部分需要一台已 `alembic upgrade head` 的一次性 MySQL：
 
     RUN_MYSQL_KEY_TESTS=1 python -m pytest tests/test_purchase_record.py -v
 
-姿势沿用 `tests/test_api_key_service.py`：没有 conftest，模块自带 `loop_scope="module"` 标记、
+姿势沿用原 `tests/test_api_key_service.py`：没有 conftest，模块自带 `loop_scope="module"` 标记、
 自签验证码 token 走真登录链路、出网用 `httpx.MockTransport` 顶掉。
 """
 
-import base64
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import time
@@ -22,10 +20,8 @@ import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from pydantic import SecretStr
 from sqlalchemy import delete, select
 
-from app.core.api_key_crypto import KeyRing
 from app.core.config import settings
 from app.core.errors import BizError, ErrorCode
 from app.core.security import hash_password
@@ -33,9 +29,7 @@ from app.database.session import async_engine, async_session_local
 from app.main import app
 from app.models import PurchaseRecord, User, UserSession
 from app.router.purchase_record import _validate_purchased_at, _validate_specs, _validate_url
-from app.services import chat_service, product_page
-from app.services.api_key_service import ApiKeyService
-from app.services.chat_service import SYSTEM_PROMPT, _system_prompt_with
+from app.services import product_page
 from app.services.product_page import clean_title, parse_product_url
 from app.services.user_profile import compose_context, summarize_focus, summarize_profile
 
@@ -248,29 +242,6 @@ def test_compose_labels_both_blocks():
     assert merged.index("用户本次勾选的商品") < merged.index("用户消费概况")
 
 
-# ==================== system 提示合成：红线一个字不能动 ====================
-
-def test_system_prompt_is_untouched_without_context():
-    assert _system_prompt_with("") == SYSTEM_PROMPT
-    assert _system_prompt_with("   \n  ") == SYSTEM_PROMPT
-
-
-def test_system_prompt_keeps_the_no_realtime_price_red_line():
-    merged = _system_prompt_with("用户消费概况：共 3 条消费记录。")
-    assert merged.startswith(SYSTEM_PROMPT)
-    assert "你没有实时商品、库存、价格或优惠券数据" in merged
-    assert "【用户消费记录】" in merged
-    assert "用户消费概况" in merged
-
-
-def test_system_prompt_truncates_oversized_context():
-    # 引导语本身含一个「记」字（【用户消费记录】），所以断言总长为 1 + 上限
-    merged = _system_prompt_with("记" * 9000)
-    assert merged.count("记") == 1 + 4000
-    assert merged.endswith("记")
-    assert len(_system_prompt_with("x" * 9000)) == len(SYSTEM_PROMPT) + len(chat_service._CONTEXT_LEAD) + 4000
-
-
 # ==================== HTTP 集成 ====================
 
 @pytest_asyncio.fixture(loop_scope="module")
@@ -309,24 +280,6 @@ async def _set_password_and_login(client: AsyncClient, user_id: int) -> None:
 async def _count(user_id: int) -> int:
     async with async_session_local() as db:
         return await db.scalar(select(PurchaseRecord.id).where(PurchaseRecord.user_id == user_id).limit(1)) is not None
-
-
-def _use_keks(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "api_key_keks", SecretStr('{"v1":"' + base64.b64encode(b"1" * 32).decode() + '"}'))
-    monkeypatch.setattr(settings, "api_key_active_kek_version", "v1")
-
-
-def _stub_outbound(monkeypatch, target_module, payload: dict) -> list[dict]:
-    """顶掉某个模块的 httpx.AsyncClient，记录它真正发出去的请求体。"""
-    bodies: list[dict] = []
-    original = httpx.AsyncClient
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        bodies.append(json.loads(request.content))
-        return httpx.Response(200, json=payload)
-
-    monkeypatch.setattr(target_module.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
-    return bodies
 
 
 async def test_records_require_session():
@@ -472,96 +425,3 @@ async def test_link_preview_without_session_is_rejected():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/purchase-records/link-preview", json={"product_url": "https://item.jd.com/1.html"}, headers=WRITE)
         assert response.status_code == 401
-
-
-async def _prepare_chat_user(user_id: int, provider: str, monkeypatch) -> None:
-    _use_keks(monkeypatch)
-    async with async_session_local() as db:
-        async with db.begin():
-            user = await db.scalar(select(User).where(User.id == user_id))
-            user.model_provider = provider
-    await ApiKeyService(async_session_local, KeyRing.from_settings(settings)).save_key(user_id, provider, "sk-test-secret-aaaa", actor=ACTOR)
-
-
-async def test_chat_injects_profile_and_focus_openai_shape(two_users, monkeypatch):
-    first = two_users[0]
-    await _prepare_chat_user(first, "openai", monkeypatch)
-    bodies = _stub_outbound(monkeypatch, chat_service, {"choices": [{"message": {"content": "好的"}}]})
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        await _set_password_and_login(client, first)
-        saved = await client.post("/purchase-records", json={"name": "戴森 V12 Detect", "platform": "苏宁", "price": 2999}, headers=WRITE)
-        record_id = saved.json()["data"]["id"]
-        question = "这个牌子的东西我之前买过吗"
-
-        reply = await client.post("/chat/message", json={
-            "messages": [{"role": "user", "content": question}],
-            # 重复、0、负数都该被 ChatInput 的校验器吃掉，只留 1 个有效 id
-            "record_ids": [record_id, record_id, 0, -5],
-        }, headers=WRITE)
-        assert reply.status_code == 200, reply.text
-        assert reply.json()["data"]["model"] == "gpt-4o-mini"
-
-        system = bodies[-1]["messages"][0]
-        assert system["role"] == "system"
-        assert system["content"].startswith(SYSTEM_PROMPT)
-        assert "戴森 V12 Detect" in system["content"]
-        assert "用户本次勾选的商品" in system["content"]
-        assert "用户消费概况" in system["content"]
-        # 注入走 system，用户原话一个字不动
-        assert bodies[-1]["messages"][-1] == {"role": "user", "content": question}
-
-        called = len(bodies)
-        foreign = await client.post("/chat/message", json={
-            "messages": [{"role": "user", "content": "接着聊"}],
-            "record_ids": [999999999],
-        }, headers=WRITE)
-        assert foreign.status_code == 400
-        assert "所选消费记录不存在" in foreign.json()["msg"]
-        assert len(bodies) == called        # 报错发生在调模型之前，一次外呼都没花出去
-
-        assert (await client.post("/chat/message", json={"messages": [{"role": "user", "content": "随便聊聊"}]}, headers=WRITE)).status_code == 200
-        plain = bodies[-1]["messages"][0]["content"]
-        assert "用户本次勾选的商品" not in plain
-        assert "用户消费概况" in plain      # 没勾选也带画像
-
-
-async def test_chat_injects_profile_for_anthropic_shape(two_users, monkeypatch):
-    """anthropic 的 system 是顶层字段，不是 messages 首条 —— 两个分支都得改到。"""
-    second = two_users[1]
-    await _prepare_chat_user(second, "anthropic", monkeypatch)
-    bodies = _stub_outbound(monkeypatch, chat_service, {"content": [{"type": "text", "text": "好的"}]})
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        await _set_password_and_login(client, second)
-        saved = await client.post("/purchase-records", json={"name": "小米空气净化器 4 Pro"}, headers=WRITE)
-        record_id = saved.json()["data"]["id"]
-
-        reply = await client.post("/chat/message", json={
-            "messages": [{"role": "user", "content": "滤芯多久换一次"}],
-            "record_ids": [record_id],
-        }, headers=WRITE)
-        assert reply.status_code == 200, reply.text
-        assert reply.json()["data"]["model"] == "claude-haiku-4-5"
-
-        body = bodies[-1]
-        assert body["system"].startswith(SYSTEM_PROMPT)
-        assert "小米空气净化器 4 Pro" in body["system"]
-        assert "你没有实时商品、库存、价格或优惠券数据" in body["system"]
-        assert [item["role"] for item in body["messages"]] == ["user"]   # 没有伪装的 system 消息
-
-
-async def test_chat_still_works_with_no_records_at_all(two_users, monkeypatch):
-    """没记录的用户，system 提示必须与改动前逐字相同。"""
-    second = two_users[1]
-    await _prepare_chat_user(second, "openai", monkeypatch)
-    async with async_session_local() as db:
-        async with db.begin():
-            await db.execute(delete(PurchaseRecord).where(PurchaseRecord.user_id == second))
-    bodies = _stub_outbound(monkeypatch, chat_service, {"choices": [{"message": {"content": "好的"}}]})
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        await _set_password_and_login(client, second)
-        assert (await client.get("/purchase-records")).json()["data"] == []
-        assert (await client.post("/chat/message", json={"messages": [{"role": "user", "content": "你好"}]}, headers=WRITE)).status_code == 200
-        assert bodies[-1]["messages"][0]["content"] == SYSTEM_PROMPT
