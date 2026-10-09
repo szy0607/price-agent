@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { PhArrowRight, PhCheck, PhMagnifyingGlass, PhPlus, PhShoppingCart, PhTrash, PhX } from '@phosphor-icons/vue'
+import PlatformDeck from '../components/PlatformDeck.vue'
 import {
   createPurchaseRecord,
   deletePurchaseRecord,
@@ -24,6 +25,27 @@ const form = reactive({ name: '', productUrl: '', platform: '', price: '', specs
 const emptyForm = { ...form }
 const priced = computed(() => records.value.filter((item) => item.price !== null && item.price !== undefined))
 const totalSpent = computed(() => priced.value.reduce((sum, item) => sum + item.price, 0))
+
+// 卡片组的分组维度。purchase_record 表没有 category 列（分表决策 #29/#30），
+// 所以这里用真实存在的 platform 分组，不擅自加字段。
+function platformOf(item) {
+  return (item.platform || '').trim() || '平台未记'
+}
+const activePlatform = ref(null)
+const platformGroups = computed(() => {
+  const map = new Map()
+  for (const item of records.value) {
+    const key = platformOf(item)
+    const group = map.get(key) || { key, count: 0, total: 0 }
+    group.count += 1
+    group.total += item.price || 0
+    map.set(key, group)
+  }
+  return [...map.values()]
+})
+const visibleRecords = computed(() =>
+  activePlatform.value ? records.value.filter((item) => platformOf(item) === activePlatform.value) : records.value,
+)
 
 function notify(message) {
   toast.value = message
@@ -83,6 +105,10 @@ async function refresh() {
   try {
     records.value = await listPurchaseRecords()
     selectedIds.value = selectedIds.value.filter((id) => records.value.some((item) => item.id === id))
+    // 删掉最后一条后，被选中的平台可能已经不存在了，别把筛选卡在空集上
+    if (activePlatform.value && !records.value.some((item) => platformOf(item) === activePlatform.value)) {
+      activePlatform.value = null
+    }
   } catch (error) {
     notify(error.message || '消费记录读取失败')
   } finally {
@@ -190,10 +216,36 @@ onMounted(refresh)
         </div>
       </div>
 
+      <!-- 平台堆叠卡片组：默认收拢成一摞，鼠标移入向四周散开，点卡片筛选下方列表。
+           这块刻意常驻白底（动效设计口径），不跟随深色模式。 -->
+      <section
+        v-if="!loading && records.length"
+        class="mt-7 overflow-visible rounded-2xl bg-white px-6 py-7 shadow-[0_18px_40px_-32px_rgba(15,23,42,.5)] ring-1 ring-zinc-200"
+      >
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">By platform</p>
+            <h2 class="mt-1.5 text-base font-semibold text-zinc-900">按平台看这笔钱花在哪</h2>
+            <p class="mt-1 text-sm text-zinc-500">鼠标移入卡片组展开，点一张卡就只看那个平台。</p>
+          </div>
+          <button
+            v-if="activePlatform"
+            type="button"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            @click="activePlatform = null"
+          >
+            <PhX :size="15" />清除筛选：{{ activePlatform }}
+          </button>
+        </div>
+        <div class="flex justify-center py-8">
+          <PlatformDeck :groups="platformGroups" :active="activePlatform" @select="activePlatform = $event" />
+        </div>
+      </section>
+
       <div class="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section>
           <div class="mb-3 flex items-center justify-between gap-3">
-            <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">我的消费记录 <span class="ml-1 text-zinc-400">{{ records.length }}</span></h2>
+            <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">我的消费记录 <span class="ml-1 text-zinc-400">{{ visibleRecords.length }}</span></h2>
             <button type="button" :disabled="!selectedIds.length" class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-accent hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-blue-950/40" @click="consultSelected">带进咨询 <PhArrowRight :size="16" /></button>
           </div>
 
@@ -204,7 +256,7 @@ onMounted(refresh)
             <p class="mt-1 text-sm text-zinc-500">点击“新增记录”后填写。</p>
           </div>
           <div v-else class="space-y-3">
-            <article v-for="item in records" :key="item.id" class="flex gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-[0_8px_24px_-24px_rgba(15,23,42,.5)] dark:border-zinc-800 dark:bg-zinc-900">
+            <article v-for="item in visibleRecords" :key="item.id" class="flex gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-[0_8px_24px_-24px_rgba(15,23,42,.5)] dark:border-zinc-800 dark:bg-zinc-900">
               <input v-model="selectedIds" :value="item.id" type="checkbox" class="mt-1 h-4 w-4 accent-blue-600" :aria-label="`选择 ${item.name}`" />
               <div class="min-w-0 flex-1">
                 <div class="flex items-start justify-between gap-3">

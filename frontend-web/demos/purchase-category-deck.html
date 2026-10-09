@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>消费记录 · 分类堆叠卡片动效</title>
+<style>
+/* ============================================================
+   0. 基础变量：与 frontend-web/src/style.css 的主色口径保持一致
+   ============================================================ */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Microsoft YaHei", sans-serif;
+  --accent: #2563eb;          /* 项目主色，用作底部主视觉卡片 */
+  --ink: #172554;
+
+  /* 多巴胺高饱和配色：亮绿 / 湖蓝 / 深紫 / 浅粉 */
+  --c-green:  #2ee06a;
+  --c-lake:   #17a2c8;
+  --c-purple: #5b2ad9;
+  --c-pink:   #ffa3c0;
+
+  --dur: .42s;                /* 动画时长：需求区间 0.3~0.5s */
+  --ease: cubic-bezier(.16,.84,.44,1);   /* ease-out 家族：快出慢收，漂浮感 */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #fff;           /* 需求：纯白背景 */
+  font-family: var(--font-sans);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  /* 关掉文字选中拖拽带来的视觉噪音 */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   1. 舞台：perspective 在这里给，卡片组的 3D 透视才有支点
+   ============================================================ */
+.stage {
+  position: relative;
+  width: min(920px, 94vw);
+  /* 上下留足余量：卡片散开后最高飞到 deck 中心上方 ~115px，
+     再加 rotateX 透视的抬升，标题与卡片之间必须留出这条安全带，否则互相压字 */
+  padding: clamp(56px, 8vw, 112px) 24px;
+  display: grid;
+  justify-items: center;
+  gap: 72px;
+  border-radius: 36px;
+  /* 注意：这里绝不能开 overflow:hidden —— 卡片散开后本来就要飞出容器边界，
+     一开就会被裁掉圆角。装饰层的裁剪交给 .deco 自己负责 */
+}
+
+/* 充气装饰单独包一层并裁剪，与卡片区互不干扰 */
+.deco {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;       /* 装饰层绝不抢 hover */
+  z-index: 0;
+}
+
+/* --- 柔和的白色「充气感」曲线装饰：纯 CSS，无图片依赖 --- */
+.puff {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  /* 内阴影 + 外阴影叠出膨胀的高光与暗边，模拟充气塑料质感 */
+  box-shadow:
+    0 30px 60px -28px rgba(37, 99, 235, .22),
+    inset -18px -22px 46px rgba(203, 213, 240, .55),
+    inset 16px 18px 34px #fff;
+  filter: blur(.4px);
+  pointer-events: none;       /* 装饰层绝不抢 hover */
+  z-index: 0;
+}
+.puff--a { width: 300px; height: 300px; left: -110px; top: -70px; }
+.puff--b { width: 220px; height: 220px; right: -60px; top: 40px; }
+.puff--c { width: 420px; height: 170px; left: 50%; bottom: -70px; transform: translateX(-50%); border-radius: 999px; }
+
+/* ============================================================
+   2. 标题区
+   ============================================================ */
+.heading { position: relative; z-index: 2; text-align: center; }
+.heading h1 { margin: 0; font-size: clamp(21px, 2.6vw, 30px); letter-spacing: .5px; }
+.heading p  { margin: 8px 0 0; font-size: 14px; color: #64748b; }
+.heading .state {
+  margin-top: 10px; font-size: 13px; color: var(--accent); font-weight: 600;
+  min-height: 20px;           /* 占位，避免文案变化时页面跳动 */
+}
+
+/* ============================================================
+   3. 卡片组容器
+   关键：transform-style: preserve-3d 让每张卡片的 Z 位移真正生效
+   ============================================================ */
+.deck {
+  position: relative;
+  z-index: 2;
+  width: 300px;
+  height: 300px;
+  perspective: 1100px;        /* 需求：CSS perspective 实现立体堆叠 */
+  cursor: pointer;
+}
+.deck__inner {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(14deg) rotateZ(-6deg);  /* 整组微微前倾，错落漂浮感 */
+  transition: transform var(--dur) var(--ease);
+}
+/* 悬停/聚焦/锁定 三种触发方式共用同一套「散开」选择器 */
+.deck:hover  .deck__inner,
+.deck.is-open   .deck__inner,
+.deck.is-pinned .deck__inner {
+  transform: rotateX(6deg) rotateZ(-2deg);   /* 展开时回正一点，读卡片更清楚 */
+}
+
+/* ============================================================
+   4. 单张卡片
+   --sx/--sy/--sz/--srot  = 收拢（堆叠）位
+   --ox/--oy/--oz/--orot  = 散开（错落）位
+   两套位姿写在自定义属性上，:hover 只切 transform，动画由 transition 负责
+   ============================================================ */
+.card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 26px;        /* 需求：大圆角 */
+  text-align: left;
+  font: inherit;
+  color: #fff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transform-origin: 50% 60%;
+
+  /* 收拢态：互相叠压、缩小、偏淡、轻微旋转 */
+  opacity: .58;
+  transform:
+    translate(-50%, -50%)
+    translate3d(var(--sx), var(--sy), var(--szd, 0px))
+    scale(var(--ss, .74))
+    rotate(var(--srot, 0deg));
+
+  transition:
+    transform   var(--dur) var(--ease),
+    opacity     var(--dur) var(--ease),
+    box-shadow  var(--dur) var(--ease);
+
+  box-shadow: 0 10px 22px -12px rgba(15, 23, 42, .38);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 散开态：回到正常尺寸与满不透明度，移到错落目标位
+   需求要求「优先用 CSS :hover」——这里 :hover / :focus-within / JS 类名三者并列，
+   鼠标党、键盘党、触屏党都能触发，JS 只是补充而非必需 */
+.deck:hover  .card,
+.deck.is-open   .card,
+.deck.is-pinned .card {
+  opacity: 1;
+  transform:
+    translate(-50%, -50%)
+    translate3d(var(--ox), var(--oy), var(--ozd, 0px))
+    scale(var(--os, 1))
+    rotate(var(--orot, 0deg));
+}
+
+/* 单卡悬停增强：再放大上浮一档 + 阴影加深
+   选择器多一层 .card:hover，优先级高于上面的散开态，故能覆盖 */
+.deck:hover .card:hover,
+.deck.is-open .card:hover,
+.deck.is-pinned .card:hover {
+  transform:
+    translate(-50%, -50%)
+    translate3d(var(--ox), calc(var(--oy) - 16px), calc(var(--ozd, 0px) + 70px))
+    scale(calc(var(--os, 1) * 1.09))
+    rotate(calc(var(--orot, 0deg) * .4));   /* 悬停时把旋转摆正，文字好读 */
+  box-shadow: 0 34px 56px -20px rgba(15, 23, 42, .42);
+}
+
+/* --- 卡片内容 --- */
+.card__en {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  opacity: .96;
+}
+.card__cn { font-size: 12px; opacity: .82; }
+.card__count {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.card__face {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  width: 74px;
+  height: 74px;
+  opacity: .9;                /* 卡通形象当背景点缀，不压过文字 */
+}
+
+/* ============================================================
+   5. 底部主视觉卡片：蓝色 Yang mini+ 表情贴纸 + IDEA 灯泡
+   它不参与散开，是整组的视觉基底，永远在最下层
+   ============================================================ */
+.card--base {
+  width: 268px;
+  height: 152px;
+  border-radius: 30px;
+  background: linear-gradient(145deg, #3b82f6 0%, var(--accent) 46%, #1e40af 100%);
+  opacity: 1;                 /* 基底常驻满不透明度 */
+  z-index: 1;
+  transform:
+    translate(-50%, -50%)
+    translate3d(0, 74px, -30px)
+    rotate(-3deg);
+  box-shadow: 0 26px 44px -22px rgba(30, 64, 175, .55);
+  cursor: default;
+}
+.deck:hover .card--base,
+.deck.is-open .card--base,
+.deck.is-pinned .card--base { transform: translate(-50%, -50%) translate3d(0, 78px, -30px) rotate(-3deg); }
+.card--base:hover { transform: translate(-50%, -50%) translate3d(0, 78px, -30px) rotate(-3deg); }  /* 基底不做单卡放大 */
+
+.card--base .idea {
+  position: absolute; right: 14px; top: 14px; width: 26px; height: 26px;
+}
+.sticker {
+  font-size: 30px;
+  line-height: 1;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .22));
+}
+.card__brand { font-size: 17px; font-weight: 800; letter-spacing: .3px; }
+
+/* 无障碍：尊重系统「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .card, .deck__inner { transition-duration: .01ms; }
+}
+
+/* 焦点可见性：键盘 Tab 时给明确描边 */
+.card:focus-visible { outline: 3px solid #fff; outline-offset: -6px; border-radius: 24px; }
+
+@media (max-width: 640px) {
+  .deck { width: 260px; height: 250px; }
+}
+</style>
+</head>
+<body>
+
+<!-- 卡通形象 / 灯泡图标：一次定义，多处 <use> 复用，零外部资源 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- 潮玩感小怪物：圆身体 + 双眼 + 笑嘴 -->
+    <symbol id="glyph-monster" viewBox="0 0 40 40">
+      <path d="M20 4c8.4 0 14 6 14 14v12c0 2.4-2 3.4-4 2.4l-3-1.6-3 2c-1.4.9-3.2.9-4.6 0l-2.8-1.8-3 1.8c-1.9 1.2-4.6.2-4.6-2.6V18C8 10 11.6 4 20 4z" fill="#fff" opacity=".9"/>
+      <circle cx="15.5" cy="17" r="2.6" fill="#172554"/>
+      <circle cx="25" cy="17" r="2.6" fill="#172554"/>
+      <path d="M15 24c2.8 2.6 7.4 2.6 10.2 0" stroke="#172554" stroke-width="2" fill="none" stroke-linecap="round"/>
+    </symbol>
+    <!-- 星星 -->
+    <symbol id="glyph-star" viewBox="0 0 40 40">
+      <path d="M20 3l4.6 10.4L36 15l-8 8.2 2.2 11.4L20 28.8 9.8 34.6 12 23.2 4 15l11.4-1.6z" fill="#fff" opacity=".92"/>
+    </symbol>
+    <!-- 水滴/家居感圆润形体 -->
+    <symbol id="glyph-drop" viewBox="0 0 40 40">
+      <path d="M20 3c6 7.6 11 12.4 11 18a11 11 0 11-22 0c0-5.6 5-10.4 11-18z" fill="#fff" opacity=".9"/>
+      <circle cx="16.5" cy="22" r="2.2" fill="#172554"/>
+      <circle cx="24" cy="22" r="2.2" fill="#172554"/>
+    </symbol>
+    <!-- 小花 -->
+    <symbol id="glyph-flower" viewBox="0 0 40 40">
+      <g fill="#fff" opacity=".9">
+        <circle cx="20" cy="9" r="6.2"/><circle cx="30" cy="17" r="6.2"/>
+        <circle cx="26" cy="29" r="6.2"/><circle cx="14" cy="29" r="6.2"/>
+        <circle cx="10" cy="17" r="6.2"/>
+      </g>
+      <circle cx="20" cy="20" r="4.4" fill="#172554" opacity=".85"/>
+    </symbol>
+    <!-- IDEA 灯泡 -->
+    <symbol id="glyph-idea" viewBox="0 0 24 24">
+      <path d="M12 2a7 7 0 00-4 12.7c.6.5 1 1.2 1.1 2h5.8c.1-.8.5-1.5 1.1-2A7 7 0 0012 2z" fill="#fff" opacity=".95"/>
+      <rect x="9.6" y="18" width="4.8" height="1.8" rx=".9" fill="#fff" opacity=".8"/>
+      <rect x="10.2" y="20.6" width="3.6" height="1.6" rx=".8" fill="#fff" opacity=".6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<main class="stage">
+  <div class="deco" aria-hidden="true">
+    <div class="puff puff--a"></div>
+    <div class="puff puff--b"></div>
+    <div class="puff puff--c"></div>
+  </div>
+
+  <header class="heading">
+    <h1>消费记录 · 分类</h1>
+    <p>鼠标移入卡片组 → 上层分类卡片向四周散开；移入单卡 → 该卡片上浮放大；移出自动收拢复位</p>
+    <div class="state" id="stateLine">当前分类：全部</div>
+  </header>
+
+  <!-- 卡片组：--key 卡片的位姿变量由 JS 按数据注入，便于接真实消费记录 -->
+  <div class="deck" id="deck" aria-label="消费分类卡片组">
+    <div class="deck__inner" id="deckInner">
+      <!-- 底部主视觉基底卡片（静态写死，不参与散开） -->
+      <div class="card card--base">
+        <svg class="idea" aria-hidden="true"><use href="#glyph-idea"/></svg>
+        <div>
+          <div class="sticker" role="img" aria-label="表情贴纸">😺✨</div>
+          <div class="card__brand">Yang mini+</div>
+        </div>
+        <div class="card__cn">IDEA · 我的消费灵感</div>
+      </div>
+      <!-- 上层分类卡片由 JS 插入到这里 -->
+    </div>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   数据层：分类 = 前端对消费记录的聚合结果
+   注意：purchase_record 表没有 category 列（AGENTS.md §0 禁止擅自加列），
+   所以这里的分类来自前端 utils/parameterRecords.js 的既有口径。
+   接真实数据时只需替换 RECORDS 的来源，视觉与交互代码不用动。
+   ============================================================ */
+const RECORDS = [
+  { category: '数码影音', price: 2999 },
+  { category: '数码影音', price: 459 },
+  { category: '数码影音', price: 189 },
+  { category: '家居日用', price: 68 },
+  { category: '家居日用', price: 235 },
+  { category: '美妆个护', price: 320 },
+  { category: '美妆个护', price: 128 },
+  { category: '美妆个护', price: 76 },
+  { category: '未分类',   price: 42 },
+];
+
+/* 每张上层卡片的视觉配置 + 两套位姿（收拢 / 散开）
+   尺寸差异化：w/h 各不相同，符合「围绕底部主卡片错落排布」
+   散开目标位的约束：基底蓝卡占据 x[-134,134] / y[-2,150]，
+   而它的品牌字与贴纸排在卡片下半部，所以上层卡一律往「上方两侧」飞，
+   只压蓝卡留白的顶边，不挡 "Yang mini+" 那行字。 */
+const CARD_META = [
+  {
+    key: '数码影音', en: 'DIGITAL', color: 'var(--c-green)', glyph: 'glyph-monster',
+    w: 152, h: 118, z: 5,
+    // 收拢：叠在基底上方偏左，明显缩小
+    stack: { sx: '-14px', sy: '-30px', sz: '.72', srot: '-4deg', szd: '30px' },
+    // 散开：飞到左上，带自己的旋转偏移
+    open:  { ox: '-144px', oy: '-116px', os: '1', orot: '-10deg', ozd: '95px' },
+  },
+  {
+    key: '家居日用', en: 'HOME', color: 'var(--c-lake)', glyph: 'glyph-drop',
+    w: 132, h: 132, z: 4,
+    stack: { sx: '12px', sy: '-14px', sz: '.68', srot: '5deg', szd: '18px' },
+    open:  { ox: '142px', oy: '-98px', os: '1', orot: '8deg', ozd: '70px' },
+  },
+  {
+    key: '美妆个护', en: 'BEAUTY', color: 'var(--c-purple)', glyph: 'glyph-flower',
+    w: 126, h: 100, z: 3,
+    stack: { sx: '-4px', sy: '2px', sz: '.64', srot: '-2deg', szd: '8px' },
+    open:  { ox: '-172px', oy: '-22px', os: '1', orot: '6deg', ozd: '45px' },
+  },
+  {
+    key: '未分类', en: 'OTHER', color: 'var(--c-pink)', glyph: 'glyph-star',
+    w: 138, h: 96, z: 2,
+    stack: { sx: '20px', sy: '22px', sz: '.70', srot: '3deg', szd: '-6px' },
+    // 目标位刻意压低一点：再往上就盖住蓝卡右上角的 IDEA 灯泡了
+    open:  { ox: '176px', oy: '34px', os: '1', orot: '-7deg', ozd: '20px' },
+  },
+];
+
+/* ============================================================
+   渲染：按数据生成卡片，位姿写进 CSS 自定义属性
+   ============================================================ */
+const deck = document.getElementById('deck');
+const inner = document.getElementById('deckInner');
+const stateLine = document.getElementById('stateLine');
+
+function buildCards() {
+  const tally = RECORDS.reduce((acc, r) => {
+    acc[r.category] = (acc[r.category] || 0) + 1;
+    return acc;
+  }, {});
+
+  CARD_META.forEach(meta => {
+    const count = tally[meta.key] || 0;
+    const total = RECORDS.filter(r => r.category === meta.key)
+                         .reduce((s, r) => s + (r.price || 0), 0);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card card--cat';
+    btn.dataset.key = meta.key;
+    btn.style.width  = meta.w + 'px';
+    btn.style.height = meta.h + 'px';
+    btn.style.background = meta.color;
+    btn.style.zIndex = meta.z;          /* 需求：z-index 精准控制前后层级 */
+
+    // 位姿变量：收拢态 + 散开态各一套
+    Object.entries(meta.stack).forEach(([k, v]) => btn.style.setProperty('--' + k, v));
+    Object.entries(meta.open).forEach(([k, v]) => btn.style.setProperty('--' + k, v));
+
+    btn.innerHTML = `
+      <svg class="card__face" aria-hidden="true"><use href="#${meta.glyph}"/></svg>
+      <div>
+        <div class="card__en">${meta.en}</div>
+        <div class="card__cn">${meta.key}</div>
+      </div>
+      <div>
+        <div class="card__count">${count} 笔</div>
+        <div class="card__cn">¥${total.toLocaleString('zh-CN')}</div>
+      </div>`;
+
+    inner.appendChild(btn);
+  });
+}
+buildCards();
+
+/* ============================================================
+   JS 增强层
+   基础散开已由 CSS :hover / :focus-within 完成，这里只做三件 CSS 做不到的事：
+   1) 悬停单卡时把它的 z-index 顶到最高（CSS 无法动态改层级叠序）
+   2) 触屏/无鼠标场景：点击卡片组「钉住」展开状态
+   3) 点击分类卡 → 抛自定义事件给宿主页面做筛选（嵌入现有系统就接这个）
+   ============================================================ */
+const TOP_Z = 90;
+let restoreQueue = [];
+
+inner.addEventListener('mouseover', e => {
+  const card = e.target.closest('.card--cat');
+  if (!card || card.style.zIndex === String(TOP_Z)) return;
+  const prev = card.style.zIndex;
+  restoreQueue.push({ card, prev });
+  card.style.zIndex = TOP_Z;
+});
+
+/* 鼠标离开卡片组时，一次性把层级全部还原，避免残留 */
+deck.addEventListener('mouseleave', () => {
+  restoreQueue.forEach(({ card, prev }) => { card.style.zIndex = prev; });
+  restoreQueue = [];
+});
+
+/* 键盘可达性：Tab 进卡片组时同样展开（:focus-within 已处理样式，这里补状态文案） */
+deck.addEventListener('focusin', () => deck.classList.add('is-open'));
+deck.addEventListener('focusout', e => {
+  if (!deck.contains(e.relatedTarget)) deck.classList.remove('is-open');
+});
+
+/* 触屏：点空白处 = 切换钉住；点分类卡 = 选中该分类 */
+inner.addEventListener('click', e => {
+  const card = e.target.closest('.card--cat');
+  if (!card) { deck.classList.toggle('is-pinned'); return; }
+
+  deck.classList.remove('is-pinned');
+  const key = card.dataset.key;
+  stateLine.textContent = `当前分类：${key}`;
+
+  /* 与宿主系统对接的唯一出口：宿主监听 category-select 即可拿到分类做筛选 */
+  deck.dispatchEvent(new CustomEvent('category-select', {
+    detail: { category: key, count: RECORDS.filter(r => r.category === key).length },
+    bubbles: true,
+  }));
+});
+
+/* 示例：宿主页面的接法（消费记录列表筛选）
+   deck.addEventListener('category-select', e => {
+     const { category } = e.detail;
+     renderRecords(category === '全部' ? RECORDS : RECORDS.filter(r => r.category === category));
+   });
+*/
+</script>
+</body>
+</html>
