@@ -13,4 +13,5 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     captcha_key : str
     bocha_api_key : str|None = None
+    api_key_kek : str|None = None
 settings = Settings()

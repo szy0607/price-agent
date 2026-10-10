@@ -12,12 +12,18 @@ import logging
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 
+from app.router.setting import settings_router
+from app.services import model_call
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 时序要点：uvicorn 的日志配置(dictConfig)在 import 应用之后、startup 之前执行——
     # 在模块顶层改会被覆盖回去，只有 lifespan 里改才站得住
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # INFO 级访问行不再输出
+
+    model_call.start_http_client()
     yield
+    await model_call.stop_http_client()
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 setup_logging()
@@ -28,6 +34,8 @@ app.include_router(purchase_router)
 app.include_router(health_router)
 app.include_router(cart_router)
 app.include_router(owned_router)
+app.include_router(settings_router)
+
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
