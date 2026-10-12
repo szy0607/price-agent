@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CartItemOutSchema(BaseModel):
@@ -30,3 +30,14 @@ class CartItemUpdateSchema(BaseModel):
     specs : dict[str,str] | None
     image : str | None
     note : str | None
+class AiDraftInSchema(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    category: str | None = Field(default=None, max_length=64)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("商品名不能为空白")
+        return v

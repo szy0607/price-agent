@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { PhChatsCircle, PhCpu, PhGearSix, PhPaperPlaneRight, PhPlus } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { getModelSetting, listPurchaseRecords, sendChatMessage } from '../utils/api'
+import { listPurchaseRecords, sendChatMessage } from '../utils/api'
 import { loadRecords } from '../utils/parameterRecords'
 
 let nextId = 1
@@ -14,16 +14,11 @@ const activeSession = computed(() => sessions.value.find((session) => session.id
 const input = ref('')
 const sending = ref(false)
 const listRef = ref(null)
-const modelSetting = ref({ provider: null, options: [] })
 const contextItems = ref([])
 // 消费记录只留 id，商品名和价格由后端按登录用户反查；这里再取一次名字只为把提示条显示全
 const contextRecordIds = ref([])
 const contextRecords = ref([])
-const activeModel = computed(() => modelSetting.value.options.find((item) => item.provider === modelSetting.value.provider))
-const modelSummary = computed(() => {
-  if (!activeModel.value) return { label: '尚未选择模型', detail: '前往设置完成配置' }
-  return { label: activeModel.value.label || activeModel.value.provider, detail: modelSetting.value.model_name || activeModel.value.model || '已连接' }
-})
+const modelSummary = { label: '默认模型', detail: '由设置中的默认 API Key 提供' }
 
 function scrollToBottom() {
   nextTick(() => { if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight })
@@ -47,11 +42,6 @@ async function send() {
   if (!text || sending.value) return
   const session = activeSession.value
   session.error = ''
-  if (!modelSetting.value.provider) {
-    session.error = '请先在设置中保存 API Key 并选择咨询模型。'
-    return
-  }
-
   session.messages.push({ id: nextId++, role: 'user', text })
   if (session.title === '新咨询') session.title = text.slice(0, 24)
   input.value = ''
@@ -87,11 +77,6 @@ onMounted(async () => {
       contextRecords.value = []
     }
   }
-  try {
-    modelSetting.value = await getModelSetting()
-  } catch {
-    activeSession.value.error = '无法读取模型设置，请稍后重试。'
-  }
   const question = new URLSearchParams(window.location.search).get('q')
   if (question) input.value = question.slice(0, 4000)
 })
@@ -116,7 +101,7 @@ onMounted(async () => {
         <div class="flex min-w-0 items-center gap-2.5">
           <div class="min-w-0">
             <h1 class="truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ activeSession.title }}</h1>
-            <div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs" :class="activeModel ? 'text-zinc-500 dark:text-zinc-400' : 'text-amber-600 dark:text-amber-300'">
+            <div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
               <PhCpu :size="13" weight="duotone" class="shrink-0" />
               <span class="truncate font-medium">{{ modelSummary.label }}</span>
               <span class="shrink-0 text-zinc-300 dark:text-zinc-700">·</span>
@@ -143,7 +128,7 @@ onMounted(async () => {
         <div v-if="!activeSession.messages.length" class="mx-auto flex h-full max-w-lg flex-col items-center justify-center text-center">
           <BrandIcon :size="35" class="text-accent" />
           <h2 class="mt-5 text-xl font-semibold text-zinc-950 dark:text-white">开始咨询</h2>
-          <p v-if="!activeModel" class="mt-3 text-sm text-zinc-500">先在 <RouterLink to="/settings" class="font-medium text-accent underline">设置</RouterLink> 中保存 API Key 并选择模型。</p>
+          <p class="mt-3 text-sm text-zinc-500">先在 <RouterLink to="/settings" class="font-medium text-accent underline">设置</RouterLink> 中保存 API Key 并设为默认。</p>
         </div>
         <div v-else class="mx-auto max-w-3xl space-y-5">
           <div v-for="message in activeSession.messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">

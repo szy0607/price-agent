@@ -62,38 +62,32 @@ test('product library parser normalizes JSON and CSV prices', async () => {
   assert.equal(csvProduct.skus[0].prices.pdd.b, 79)
 })
 
-test('the settings page never blocks mount on a provider model listing', async () => {
+test('settings uses the key list endpoint without the removed model setting flow', async () => {
   const source = await read('src/views/SettingsView.vue')
   const loadKeys = source.match(/async function loadKeys\(\)[\s\S]*?\n\}/)
 
   assert.ok(loadKeys, 'loadKeys not found')
-  // 拉模型列表要走服务商，挂在 @change 上按需触发；挂载时只读本地接口
-  assert.doesNotMatch(loadKeys[0], /listProviderModels/)
-  assert.match(loadKeys[0], /Promise\.all\(\[listApiKeys\(\), getModelSetting\(\)\]\)/)
-  assert.match(source, /@change="onProviderChange\(selectedModelProvider\)"/)
+  assert.doesNotMatch(source, /getModelSetting|listProviderModels|setModelSetting|<select/)
+  assert.match(loadKeys[0], /listApiKeys\(\)/)
+  assert.match(source, /base_url/)
+  assert.match(source, /model_name/)
+  assert.match(source, /setDefaultApiKey/)
 })
 
-test('model listing and selection go through the guarded client calls', async () => {
+test('api key helpers use the five current setting endpoints', async () => {
   const api = await read('src/utils/api.js')
-  const listing = api.match(/export function listProviderModels\(provider\)[\s\S]*?\n\}/)
-  const setting = api.match(/export function setModelSetting\(provider, modelName = null\)[\s\S]*?\n\}/)
-
-  assert.ok(listing && setting, 'api.js helpers not found')
-  // apiRequest 只在非 GET 时自动注入同源头；这个 GET 会解密用户 Key，必须手动带上
-  assert.match(listing[0], /'X-Requested-With': 'price-agent'/)
-  assert.match(setting[0], /JSON\.stringify\(\{ provider, model_name: modelName \}\)/)
-})
-
-test('the model select always offers the saved choice and the provider default', async () => {
-  const source = await read('src/views/SettingsView.vue')
-  const choices = source.match(/const availableModels = computed\(\(\) => \{[\s\S]*?\n\}\)/)
-
-  assert.ok(choices, 'availableModels not found')
-  assert.match(choices[0], /selectedModelName\.value/)
-  assert.match(choices[0], /（已保存）/)
-  assert.match(choices[0], /（服务商默认）/)
-  // 提交条件必须同时比对厂商和模型，否则「同一厂商换个模型」这个主场景会是禁用状态
-  assert.match(source, /selectedModelProvider === modelSetting\.provider && selectedModelName === storedModelName/)
+  assert.match(api, /apiRequest\('\/setting\/api-keys'\)/)
+  assert.match(api, /apiRequest\('\/setting\/api-keys', \{[\s\S]*method: 'POST'/)
+  assert.match(api, /apiRequest\(`\/setting\/api-keys\/\$\{encodeURIComponent\(id\)\}`, \{[\s\S]*method: 'PUT'/)
+  assert.match(api, /apiRequest\(`\/setting\/api-keys\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/)
+  assert.match(api, /\/default`, \{[\s\S]*method: 'PUT'/)
+  assert.doesNotMatch(api, /\/settings\/api-keys|\/settings\/model|\/settings\/models/)
+  const chat = await read('src/views/ChatView.vue')
+  assert.doesNotMatch(chat, /getModelSetting|modelSetting/)
+  const cart = await read('src/views/CartView.vue')
+  assert.match(cart, /completeCartItemDraft\(/)
+  assert.match(cart, /key\.endsWith\('\(AI\)'\)[\s\S]*来源：网络/)
+  assert.match(cart, /网络参考价可能过时/)
 })
 
 test('every route view keeps a single element root so the page transition can animate it', async () => {

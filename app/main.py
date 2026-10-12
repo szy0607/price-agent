@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.core.errors import register_exception_handlers
+from app.core.http_client import start_http_client, close_http_client
 from app.core.logging import setup_logging
 from app.core.middleware import TraceMiddleware
 from app.router.cartitem_router import cart_router
@@ -13,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 
 from app.router.setting import settings_router
-from app.services import model_call
+from app.router.upload import upload_router
+from app.services import image_store, model_call
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,9 +23,11 @@ async def lifespan(app: FastAPI):
     # 在模块顶层改会被覆盖回去，只有 lifespan 里改才站得住
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # INFO 级访问行不再输出
 
-    model_call.start_http_client()
-    yield
-    await model_call.stop_http_client()
+    start_http_client()
+    try:
+        yield
+    finally:
+        await close_http_client()
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 setup_logging()
@@ -35,9 +39,12 @@ app.include_router(health_router)
 app.include_router(cart_router)
 app.include_router(owned_router)
 app.include_router(settings_router)
+app.include_router(upload_router)
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+# 用户上传的展示图：image 列存 /uploads/xxx.jpg 相对路径，域名无关，换环境不迁移数据
+app.mount("/uploads", StaticFiles(directory=image_store.UPLOAD_DIR), name="uploads")
 
 
 @app.get("/docs", include_in_schema=False)

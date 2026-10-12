@@ -1,353 +1,117 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  PhArrowClockwise, PhCheckCircle, PhEye, PhEyeSlash, PhFloppyDisk,
-  PhKey, PhPencilSimple, PhPlus, PhTrash, PhWarningCircle, PhX,
-} from '@phosphor-icons/vue'
-import { deleteApiKey, getModelSetting, listApiKeys, listProviderModels, saveApiKey, setModelSetting } from '../utils/api'
+import { PhArrowClockwise, PhCheckCircle, PhEye, PhEyeSlash, PhKey, PhPencilSimple, PhPlus, PhStar, PhTrash, PhWarningCircle, PhX } from '@phosphor-icons/vue'
+import { createApiKey, deleteApiKey, listApiKeys, setDefaultApiKey, updateApiKey } from '../utils/api'
 import { clearAuth } from '../utils/auth'
 
 const router = useRouter()
 const keys = ref([])
-const modelSetting = ref({ provider: null, options: [] })
-const selectedModelProvider = ref('')
-const selectingModel = ref(false)
 const loading = ref(true)
-const modelByProvider = ref({})
-const modelChoices = ref([])
-const modelChoicesState = ref('idle')
-const modelChoicesError = ref('')
-const selectedModelName = ref('')
-let modelFetchSeq = 0
+const saving = ref(false)
+const deleting = ref(false)
+const settingDefault = ref(false)
 const pageError = ref('')
 const feedback = ref('')
-const editingProvider = ref('')
-const selectedProvider = ref('openai')
-const customProvider = ref('')
-const keyValue = ref('')
-const showKey = ref(false)
-const saving = ref(false)
 const formError = ref('')
-const keyInput = ref(null)
+const showForm = ref(false)
+const showKey = ref(false)
+const editingId = ref(null)
 const confirmTarget = ref(null)
+const keyInput = ref(null)
 const deleteDialog = ref(null)
-const deleting = ref(false)
+const form = ref({ provider: '', base_url: '', api_key: '', model_name: '' })
 
-const providers = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'qwen', label: '通义千问' },
-  { value: 'custom', label: '其他服务商' },
-]
-const providerNames = Object.fromEntries(providers.map((provider) => [provider.value, provider.label]))
-const provider = computed(() => editingProvider.value || (selectedProvider.value === 'custom' ? customProvider.value.trim().toLowerCase() : selectedProvider.value))
-const configuredProvider = computed(() => keys.value.find((item) => item.provider === provider.value))
-
-function providerLabel(value) {
-  return providerNames[value] || value
+function resetForm() {
+  editingId.value = null
+  form.value = { provider: '', base_url: '', api_key: '', model_name: '' }
+  showKey.value = false
+  formError.value = ''
+  showForm.value = true
+  nextTick(() => keyInput.value?.focus())
 }
 
-function displayTime(value) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+function editKey(item) {
+  editingId.value = item.id
+  form.value = { provider: item.provider || '', base_url: item.base_url || '', api_key: '', model_name: item.model_name || '' }
+  showKey.value = false
+  formError.value = ''
+  showForm.value = true
+  nextTick(() => keyInput.value?.focus())
 }
 
-function defaultModelFor(value) {
-  return modelSetting.value.options.find((item) => item.provider === value)?.model || ''
-}
-
-function hasActiveKey(value) {
-  return keys.value.some((item) => item.provider === value && item.status === 'active')
-}
-
-const storedModelName = computed(() => modelByProvider.value[selectedModelProvider.value] || defaultModelFor(selectedModelProvider.value))
-
-// 拉取失败或还没拉取时，下拉也必须有的选——唯一一项「服务商默认」。
-// 已保存值与默认值永远并进选项，否则被后端 best-effort 过滤掉的模型会选不中，
-// 或者提交时被静默改成别的模型。
-const availableModels = computed(() => {
-  const fallbackId = defaultModelFor(selectedModelProvider.value)
-  const source = modelChoicesState.value === 'ready' ? [...modelChoices.value] : []
-  const seen = new Set(source.map((item) => item.id))
-  if (selectedModelName.value && !seen.has(selectedModelName.value)) {
-    source.unshift({ id: selectedModelName.value, label: `${selectedModelName.value}（已保存）` })
-    seen.add(selectedModelName.value)
-  }
-  if (fallbackId && !seen.has(fallbackId)) source.push({ id: fallbackId, label: `${fallbackId}（服务商默认）` })
-  return source
-})
-
-const modelNotInList = computed(() => (
-  modelChoicesState.value === 'ready' && !modelChoices.value.some((item) => item.id === selectedModelName.value)
-))
+function closeForm() { if (!saving.value) showForm.value = false }
+function displayKey(item) { return item.key_suffix ? `••••${item.key_suffix}` : '已保存' }
 
 async function loadKeys() {
   loading.value = true
   pageError.value = ''
-  keys.value = []
-  try {
-    const [savedKeys, setting] = await Promise.all([listApiKeys(), getModelSetting()])
-    keys.value = savedKeys
-    modelSetting.value = setting
-    selectedModelProvider.value = setting.provider || ''
-    modelByProvider.value = Object.fromEntries(savedKeys.map((item) => [item.provider, item.model_name]))
-    modelChoices.value = []
-    modelChoicesState.value = 'idle'
-    modelChoicesError.value = ''
-    selectedModelName.value = selectedModelProvider.value
-      ? modelByProvider.value[selectedModelProvider.value] || defaultModelFor(selectedModelProvider.value)
-      : ''
-  } catch (error) {
-    if (error.status === 401) {
-      clearAuth()
-      await router.replace({ name: 'auth', query: { redirect: '/settings' } })
-      return
-    }
+  try { keys.value = await listApiKeys() } catch (error) {
+    if (error.status === 401) { clearAuth(); await router.replace({ name: 'auth', query: { redirect: '/settings' } }); return }
     pageError.value = error.status === 500 ? '密钥服务暂不可用' : (error.message || '加载失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadModelChoices(value) {
-  if (!hasActiveKey(value)) {
-    modelChoicesState.value = 'idle'
-    modelChoicesError.value = ''
-    return
-  }
-  // 快速连切厂商时，晚到的旧响应必须丢掉，否则列表会配错厂商。
-  const seq = ++modelFetchSeq
-  modelChoicesState.value = 'loading'
-  modelChoicesError.value = ''
-  try {
-    const data = await listProviderModels(value)
-    if (seq !== modelFetchSeq) return
-    modelChoices.value = data.models || []
-    modelChoicesState.value = 'ready'
-  } catch (error) {
-    if (seq !== modelFetchSeq) return
-    modelChoices.value = []
-    modelChoicesState.value = 'error'
-    modelChoicesError.value = error.message || '无法获取模型列表'
-  }
-}
-
-async function onProviderChange(value) {
-  selectedModelName.value = modelByProvider.value[value] || defaultModelFor(value)
-  modelChoices.value = []
-  await loadModelChoices(value)
-}
-
-async function selectModel() {
-  if (!selectedModelProvider.value) return
-  selectingModel.value = true
-  pageError.value = ''
-  feedback.value = ''
-  try {
-    await setModelSetting(selectedModelProvider.value, selectedModelName.value || null)
-    modelSetting.value.provider = selectedModelProvider.value
-    modelSetting.value.model_name = selectedModelName.value
-    modelByProvider.value = { ...modelByProvider.value, [selectedModelProvider.value]: selectedModelName.value || null }
-    feedback.value = '咨询模型已更新'
-  } catch (error) {
-    pageError.value = error.message || '切换模型失败'
-  } finally {
-    selectingModel.value = false
-  }
-}
-
-function resetEditor() {
-  editingProvider.value = ''
-  keyValue.value = ''
-  showKey.value = false
-  formError.value = ''
-}
-
-async function editKey(item) {
-  editingProvider.value = item.provider
-  keyValue.value = ''
-  showKey.value = false
-  formError.value = ''
-  await nextTick()
-  keyInput.value?.focus()
+  } finally { loading.value = false }
 }
 
 async function save() {
-  formError.value = ''
-  feedback.value = ''
-  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(provider.value)) {
-    formError.value = '服务商标识须以小写字母开头，只能包含字母、数字、下划线或连字符'
-    return
-  }
-  const bytes = new TextEncoder().encode(keyValue.value)
-  if (keyValue.value.length < 8 || bytes.length > 4096) {
-    formError.value = 'API Key 须至少 8 个字符且不超过 4096 字节'
-    return
-  }
+  formError.value = ''; feedback.value = ''
+  const value = form.value
+  if (!value.provider.trim()) { formError.value = '请填写服务商标识'; return }
+  if (!/^https:\/\//i.test(value.base_url.trim())) { formError.value = 'Base URL 必须以 https:// 开头'; return }
+  if (value.api_key.trim().length < 1) { formError.value = '请填写 API Key'; return }
+  if (!value.model_name.trim()) { formError.value = '请填写模型名称'; return }
   saving.value = true
-  const target = provider.value
-  const replacement = Boolean(configuredProvider.value)
   try {
-    await saveApiKey(target, keyValue.value)
-    resetEditor()
-    feedback.value = `${providerLabel(target)} ${replacement ? '已更新' : '已添加'}`
+    const payload = { provider: value.provider.trim(), base_url: value.base_url.trim(), api_key: value.api_key.trim(), model_name: value.model_name.trim() }
+    if (editingId.value) await updateApiKey(editingId.value, payload)
+    else await createApiKey(payload)
+    showForm.value = false
+    feedback.value = editingId.value ? 'API Key 已更新' : 'API Key 已添加'
     await loadKeys()
-  } catch (error) {
-    formError.value = error.status === 500 ? '密钥服务暂不可用' : (error.message || '保存失败')
-  } finally {
-    saving.value = false
-  }
+  } catch (error) { formError.value = error.status === 500 ? '密钥服务暂不可用' : (error.message || '保存失败') } finally { saving.value = false }
 }
 
 async function remove() {
   if (!confirmTarget.value) return
   deleting.value = true
-  const target = confirmTarget.value.provider
-  try {
-    await deleteApiKey(target)
-    if (editingProvider.value === target) resetEditor()
-    confirmTarget.value = null
-    feedback.value = `${providerLabel(target)} 已移除`
-    await loadKeys()
-  } catch (error) {
-    pageError.value = error.message || '移除失败'
-    confirmTarget.value = null
-  } finally {
-    deleting.value = false
-  }
+  try { await deleteApiKey(confirmTarget.value.id); feedback.value = 'API Key 已移除'; confirmTarget.value = null; await loadKeys() }
+  catch (error) { pageError.value = error.message || '移除失败'; confirmTarget.value = null }
+  finally { deleting.value = false }
 }
 
-async function openDelete(item) {
-  confirmTarget.value = item
-  await nextTick()
-  deleteDialog.value?.focus()
+async function makeDefault(item) {
+  if (item.is_default || settingDefault.value) return
+  settingDefault.value = true; pageError.value = ''
+  try { await setDefaultApiKey(item.id); feedback.value = `${item.provider} 已设为默认模型`; await loadKeys() }
+  catch (error) { pageError.value = error.message || '设置默认模型失败' }
+  finally { settingDefault.value = false }
 }
 
+async function openDelete(item) { confirmTarget.value = item; await nextTick(); deleteDialog.value?.focus() }
 onMounted(loadKeys)
 </script>
 
 <template>
   <div class="min-h-full bg-zinc-50 dark:bg-zinc-950">
     <div class="mx-auto max-w-5xl px-5 pb-20 pt-9 sm:px-8 sm:pt-12">
-      <div class="mb-9 border-b border-zinc-200 pb-6 dark:border-zinc-800">
-        <h1 class="text-2xl font-semibold text-zinc-950 dark:text-white">设置</h1>
-      </div>
-
-      <p v-if="pageError" class="mb-6 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-400/10 dark:text-red-300" role="alert">
-        <PhWarningCircle :size="18" />{{ pageError }}
-        <button type="button" class="ml-auto inline-flex items-center gap-1 font-medium underline" @click="loadKeys"><PhArrowClockwise :size="16" />重试</button>
-      </p>
-      <p v-if="feedback" class="mb-6 flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" role="status">
-        <PhCheckCircle :size="18" />{{ feedback }}
-      </p>
-
+      <div class="mb-9 border-b border-zinc-200 pb-6 dark:border-zinc-800"><h1 class="text-2xl font-semibold text-zinc-950 dark:text-white">设置</h1><p class="mt-2 text-sm text-zinc-500">管理模型连接。聊天会使用标记为默认的 API Key。</p></div>
+      <p v-if="pageError" class="mb-6 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-400/10 dark:text-red-300" role="alert"><PhWarningCircle :size="18" />{{ pageError }}<button type="button" class="ml-auto inline-flex items-center gap-1 font-medium underline" @click="loadKeys"><PhArrowClockwise :size="16" />重试</button></p>
+      <p v-if="feedback" class="mb-6 flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" role="status"><PhCheckCircle :size="18" />{{ feedback }}</p>
       <section class="grid gap-5 border-t border-zinc-200 py-9 dark:border-zinc-800 sm:grid-cols-[180px_minmax(0,1fr)]">
-        <div>
-          <h2 class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"><PhKey :size="18" />API Key</h2>
-        </div>
+        <div><h2 class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"><PhKey :size="18" />API Key</h2></div>
         <div class="min-w-0">
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-800">
-            <h3 class="text-base font-semibold text-zinc-900 dark:text-white">已连接的服务商</h3>
-            <button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-white transition-colors hover:bg-accent-strong" @click="resetEditor(); keyInput?.focus()">
-              <PhPlus :size="17" weight="bold" />添加密钥
-            </button>
-          </div>
-
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-800"><h3 class="text-base font-semibold text-zinc-900 dark:text-white">已连接的模型</h3><button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-white transition-colors hover:bg-accent-strong" @click="resetForm"><PhPlus :size="17" weight="bold" />添加密钥</button></div>
           <div v-if="loading" class="py-9 text-sm text-zinc-500" role="status">加载中…</div>
           <div v-else-if="!pageError && keys.length === 0" class="border-b border-zinc-200 py-9 text-sm text-zinc-500 dark:border-zinc-800">尚未添加 API Key</div>
-          <div v-for="item in keys" :key="item.provider" class="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-200 py-4 dark:border-zinc-800">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="break-all text-sm font-semibold text-zinc-900 dark:text-white">{{ providerLabel(item.provider) }}</span>
-                <span v-if="item.status === 'invalid'" class="rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-400/10 dark:text-red-300">已失效</span>
-                <span v-else class="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300">已保存</span>
-              </div>
-              <p class="mt-1 font-mono text-sm text-zinc-600 dark:text-zinc-400">{{ item.masked_key }}</p>
-              <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-500">更新于 {{ displayTime(item.update_time) }}</p>
-            </div>
-            <div class="flex items-center gap-2">
-              <button type="button" class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" :aria-label="`替换 ${providerLabel(item.provider)} 的密钥`" @click="editKey(item)"><PhPencilSimple :size="16" />替换</button>
-              <button type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-400/10 dark:hover:text-red-300" :title="`移除 ${providerLabel(item.provider)}`" :aria-label="`移除 ${providerLabel(item.provider)}`" @click="openDelete(item)"><PhTrash :size="18" /></button>
-            </div>
+          <div v-for="item in keys" :key="item.id" class="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-200 py-4 dark:border-zinc-800">
+            <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="break-all text-sm font-semibold text-zinc-900 dark:text-white">{{ item.provider }}</span><span v-if="item.is_default" class="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-400/10 dark:text-amber-300"><PhStar :size="12" weight="fill" />默认</span><span v-if="item.status === 'invalid'" class="rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-400/10 dark:text-red-300">已失效</span></div><p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ item.base_url }}</p><p class="mt-1 font-mono text-xs text-zinc-500">{{ displayKey(item) }} · {{ item.model_name }}</p></div>
+            <div class="flex items-center gap-2"><button v-if="!item.is_default" type="button" class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" :disabled="settingDefault" @click="makeDefault(item)"><PhStar :size="16" />设默认</button><button type="button" class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" :aria-label="`编辑 ${item.provider}`" @click="editKey(item)"><PhPencilSimple :size="16" />编辑</button><button type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-400/10 dark:hover:text-red-300" :title="`移除 ${item.provider}`" :aria-label="`移除 ${item.provider}`" @click="openDelete(item)"><PhTrash :size="18" /></button></div>
           </div>
-
-          <form v-if="modelSetting.options.length" class="mt-7 border-b border-zinc-200 pb-7 dark:border-zinc-800" @submit.prevent="selectModel">
-            <h3 class="text-base font-semibold text-zinc-900 dark:text-white">咨询使用的模型</h3>
-            <div class="mt-3 flex flex-wrap items-end gap-3">
-              <label class="min-w-48 flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                服务商
-                <select v-model="selectedModelProvider" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" @change="onProviderChange(selectedModelProvider)">
-                  <option value="" disabled>选择已保存的服务商</option>
-                  <option v-for="item in modelSetting.options" :key="item.provider" :value="item.provider" :disabled="!hasActiveKey(item.provider)">{{ item.label }} · {{ item.saved_model || item.model }}</option>
-                </select>
-              </label>
-              <label class="min-w-48 flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                模型
-                <select v-model="selectedModelName" :disabled="!selectedModelProvider || modelChoicesState === 'loading'" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white">
-                  <option v-if="!availableModels.length" value="" disabled>先选择服务商</option>
-                  <option v-for="item in availableModels" :key="item.id" :value="item.id">{{ item.label }}</option>
-                </select>
-              </label>
-              <button type="submit" :disabled="!selectedModelProvider || selectingModel || (selectedModelProvider === modelSetting.provider && selectedModelName === storedModelName)" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"><PhCheckCircle :size="17" />设为默认</button>
-            </div>
-            <p v-if="modelChoicesState === 'loading'" class="mt-3 text-sm text-zinc-500" role="status">正在读取该服务商的模型列表…</p>
-            <p v-else-if="modelChoicesState === 'error'" class="mt-3 flex flex-wrap items-center gap-2 text-sm text-red-700 dark:text-red-300" role="alert">
-              {{ modelChoicesError }}
-              <button type="button" class="inline-flex items-center gap-1 font-medium underline" @click="loadModelChoices(selectedModelProvider)"><PhArrowClockwise :size="15" />重试</button>
-            </p>
-            <p v-else-if="modelChoicesState === 'idle' && hasActiveKey(selectedModelProvider)" class="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-              未读取模型列表
-              <button type="button" class="inline-flex items-center gap-1 font-medium underline" @click="loadModelChoices(selectedModelProvider)"><PhArrowClockwise :size="15" />获取模型列表</button>
-            </p>
-            <p v-if="modelNotInList" class="mt-2 text-sm text-amber-700 dark:text-amber-300">已保存的模型没有出现在服务商返回的列表里，仍然可用；若调用失败请换一个。</p>
-          </form>
-
-          <form class="mt-9 border-t border-zinc-200 pt-7 dark:border-zinc-800" @submit.prevent="save">
-            <div class="mb-5 flex items-center justify-between gap-3">
-              <h3 class="text-base font-semibold text-zinc-900 dark:text-white">{{ editingProvider ? `替换 ${providerLabel(editingProvider)}` : '添加 API Key' }}</h3>
-              <button v-if="editingProvider" type="button" class="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white" @click="resetEditor">取消</button>
-            </div>
-            <label v-if="!editingProvider" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              服务商
-              <select v-model="selectedProvider" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-white">
-                <option v-for="item in providers" :key="item.value" :value="item.value">{{ item.label }}</option>
-              </select>
-            </label>
-            <label v-if="!editingProvider && selectedProvider === 'custom'" class="mt-5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              服务商标识
-              <input v-model="customProvider" type="text" autocomplete="off" spellcheck="false" maxlength="64" placeholder="provider-name" class="mt-2 block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" />
-            </label>
-            <label class="mt-5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              API Key
-              <span class="relative mt-2 block">
-                <input ref="keyInput" v-model="keyValue" :type="showKey ? 'text' : 'password'" autocomplete="new-password" autocapitalize="off" spellcheck="false" maxlength="4096" placeholder="粘贴 API Key" class="block h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 pr-11 font-mono text-sm text-zinc-900 focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" />
-                <button type="button" class="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 dark:hover:text-white" :title="showKey ? '隐藏输入' : '显示输入'" :aria-label="showKey ? '隐藏输入' : '显示输入'" @click="showKey = !showKey"><PhEyeSlash v-if="showKey" :size="18" /><PhEye v-else :size="18" /></button>
-              </span>
-            </label>
-            <p v-if="configuredProvider && !editingProvider" class="mt-3 text-sm text-amber-700 dark:text-amber-300">保存后将替换已配置的 {{ providerLabel(provider) }} 密钥。</p>
-            <p v-if="formError" class="mt-4 text-sm text-red-700 dark:text-red-300" role="alert">{{ formError }}</p>
-            <div class="mt-5 flex justify-end">
-              <button type="submit" :disabled="saving" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white transition-colors hover:bg-accent-strong disabled:opacity-50"><PhFloppyDisk :size="17" />{{ saving ? '保存中…' : '保存密钥' }}</button>
-            </div>
-          </form>
+          <p class="mt-5 text-xs leading-5 text-zinc-500">API Key 只会安全保存，列表中仅显示末四位。Base URL 必须使用 HTTPS。</p>
         </div>
       </section>
     </div>
 
-    <div v-if="confirmTarget" ref="deleteDialog" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/55 px-4" @click.self="confirmTarget = null" @keydown.esc="confirmTarget = null">
-      <div role="alertdialog" aria-modal="true" aria-labelledby="delete-key-title" class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
-        <div class="flex items-start justify-between gap-3">
-          <h2 id="delete-key-title" class="text-base font-semibold text-zinc-900 dark:text-white">移除 {{ providerLabel(confirmTarget.provider) }} 密钥</h2>
-          <button type="button" class="text-zinc-500 hover:text-zinc-900 dark:hover:text-white" title="关闭" aria-label="关闭" @click="confirmTarget = null"><PhX :size="19" /></button>
-        </div>
-        <p class="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">移除后，这个服务商将无法再使用该密钥。需要时可重新添加。</p>
-        <div class="mt-6 flex justify-end gap-2">
-          <button type="button" class="h-9 rounded-lg px-3 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" @click="confirmTarget = null">取消</button>
-          <button type="button" :disabled="deleting" class="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50" @click="remove"><PhTrash :size="16" />{{ deleting ? '移除中…' : '确认移除' }}</button>
-        </div>
-      </div>
-    </div>
+    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 px-4" role="dialog" aria-modal="true" @click.self="closeForm" @keydown.esc="closeForm"><div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"><div class="flex items-center justify-between"><h2 class="font-semibold">{{ editingId ? '编辑 API Key' : '添加 API Key' }}</h2><button type="button" aria-label="关闭" title="关闭" @click="closeForm"><PhX :size="17" /></button></div><form class="mt-5 space-y-3" @submit.prevent="save"><label class="block text-sm font-medium">服务商标识<input v-model="form.provider" required maxlength="32" placeholder="例如 openai" class="mt-1 h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /></label><label class="block text-sm font-medium">Base URL<input v-model="form.base_url" required type="url" placeholder="https://api.example.com/v1" class="mt-1 h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /></label><label class="block text-sm font-medium">模型名称<input v-model="form.model_name" required maxlength="128" placeholder="例如 gpt-4o-mini" class="mt-1 h-10 w-full rounded-lg border px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950" /></label><label class="block text-sm font-medium">API Key<span class="relative mt-1 block"><input ref="keyInput" v-model="form.api_key" :required="!editingId" :type="showKey ? 'text' : 'password'" maxlength="256" :placeholder="editingId ? '留空则保持原 Key' : '输入 API Key'" class="h-10 w-full rounded-lg border px-3 pr-10 text-sm dark:border-zinc-700 dark:bg-zinc-950" /><button type="button" class="absolute right-1 top-1 flex h-8 w-8 items-center justify-center text-zinc-500" :title="showKey ? '隐藏 API Key' : '显示 API Key'" :aria-label="showKey ? '隐藏 API Key' : '显示 API Key'" @click="showKey = !showKey"><PhEyeSlash v-if="showKey" :size="17" /><PhEye v-else :size="17" /></button></span></label><p v-if="formError" class="text-sm text-red-600 dark:text-red-300" role="alert">{{ formError }}</p><div class="flex justify-end gap-2 pt-2"><button type="button" class="h-10 rounded-lg border px-4 text-sm" @click="closeForm">取消</button><button type="submit" :disabled="saving" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"><PhCheckCircle :size="16" />{{ saving ? '保存中…' : '保存' }}</button></div></form></div></div>
+    <div v-if="confirmTarget" class="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/50 px-4" role="presentation" @click.self="confirmTarget = null"><div ref="deleteDialog" tabindex="-1" class="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-5 shadow-xl outline-none dark:border-zinc-800 dark:bg-zinc-900" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title" class="font-semibold">移除 API Key？</h2><p class="mt-2 text-sm text-zinc-500">将移除 {{ confirmTarget.provider }} 的连接配置。</p><div class="mt-5 flex justify-end gap-2"><button type="button" class="h-10 rounded-lg border px-4 text-sm" @click="confirmTarget = null">取消</button><button type="button" class="h-10 rounded-lg bg-red-600 px-4 text-sm font-medium text-white disabled:opacity-50" :disabled="deleting" @click="remove">{{ deleting ? '移除中…' : '确认移除' }}</button></div></div></div>
   </div>
 </template>

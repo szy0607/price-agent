@@ -8,6 +8,7 @@ from app.repository.owned_repo import (
     add_owned_item,
     delete_owned_item,
     update_owned_item,
+    get_latest_owned_item,
 )
 from app.schemas.owned_sche import (
     OwnedItemOutSchema,
@@ -22,6 +23,12 @@ owned_router = APIRouter(tags=["owned"], prefix="/items")
 async def get_owned_items(user: CurrentUser, session: AsyncSession = Depends(get_db_session)):
     items = await get_owned_by_user_id(user.id, session)
     return success([OwnedItemOutSchema.model_validate(r) for r in items])
+
+
+@owned_router.get("/latest")
+async def get_latest_items(user: CurrentUser, session: AsyncSession = Depends(get_db_session)):
+    items_latest = await get_latest_owned_item(user.id,session)
+    return success([OwnedItemOutSchema.model_validate(r) for r in items_latest])
 
 
 @owned_router.post("", dependencies=[Depends(require_same_origin_write)])

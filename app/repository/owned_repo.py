@@ -53,5 +53,6 @@ async def get_latest_owned_item(user_id: int, session: AsyncSession) -> list[Own
         select(OwnedItem)
         .where(OwnedItem.user_id == user_id)
         .order_by(OwnedItem.purchased_at.desc(), OwnedItem.create_time.desc())
+        .limit(5)
     )
     return list(result.all())

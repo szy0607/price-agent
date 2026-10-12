@@ -66,36 +66,30 @@ export function logoutUser() {
 }
 
 export function listApiKeys() {
-  return apiRequest('/settings/api-keys')
+  return apiRequest('/setting/api-keys')
 }
 
-export function saveApiKey(provider, apiKey) {
-  return apiRequest(`/settings/api-keys/${encodeURIComponent(provider)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ api_key: apiKey }),
+export function createApiKey({ provider, base_url, api_key, model_name }) {
+  return apiRequest('/setting/api-keys', {
+    method: 'POST',
+    body: JSON.stringify({ provider, base_url, api_key, model_name }),
   })
 }
 
-export function deleteApiKey(provider) {
-  return apiRequest(`/settings/api-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' })
-}
-
-export function getModelSetting() {
-  return apiRequest('/settings/model')
-}
-
-export function listProviderModels(provider) {
-  // 这个 GET 会让后端解密用户自己的 Key、并可能把 Key 标为失效，
-  // 所以显式带上同源写保护头——apiRequest 只在非 GET 时才自动注入它。
-  return apiRequest(`/settings/models/${encodeURIComponent(provider)}`, {
-    headers: { 'X-Requested-With': 'price-agent' },
+export function updateApiKey(id, { provider, base_url, api_key, model_name }) {
+  return apiRequest(`/setting/api-keys/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ provider, base_url, api_key, model_name }),
   })
 }
 
-export function setModelSetting(provider, modelName = null) {
-  return apiRequest('/settings/model', {
+export function deleteApiKey(id) {
+  return apiRequest(`/setting/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function setDefaultApiKey(id) {
+  return apiRequest(`/setting/api-keys/${encodeURIComponent(id)}/default`, {
     method: 'PUT',
-    body: JSON.stringify({ provider, model_name: modelName }),
   })
 }
 
@@ -164,6 +158,10 @@ export function listOwnedItems() {
   return apiRequest('/items')
 }
 
+export function listLatestOwnedItems() {
+  return apiRequest('/items/latest')
+}
+
 export function createOwnedItem(item) {
   return apiRequest('/items', { method: 'POST', body: JSON.stringify(item) })
 }
@@ -177,4 +175,33 @@ export function updateOwnedItem(id, item) {
 
 export function deleteOwnedItem(id) {
   return apiRequest(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function completeCartItemDraft({ name, category }) {
+  return apiRequest('/cart/items/ai-draft', {
+    method: 'POST',
+    body: JSON.stringify({ name, category: category || null }),
+  })
+}
+
+// 上传展示图：FormData 必须让浏览器自带 boundary，所以不走 apiRequest（它会强塞 JSON 头），
+// 只手工补同源写保护头。返回相对路径（如 /uploads/xxx.jpg）。
+export async function uploadImage(file) {
+  const form = new FormData()
+  form.append('image', file)
+  const resp = await fetch(`${API_BASE_URL}/upload/image`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'X-Requested-With': 'price-agent' },
+    body: form,
+  })
+  const payload = await resp.json().catch(() => null)
+  if (!resp.ok || payload?.code !== 0) throw new Error(payload?.msg || '上传失败')
+  return payload.data.image
+}
+
+// 后端图片统一解析：相对路径（/uploads/...）拼后端地址，http(s) 直接用，空值返回空串
+export function resolveImageUrl(path) {
+  if (!path) return ''
+  return path.startsWith('/') ? `${API_BASE_URL}${path}` : path
 }

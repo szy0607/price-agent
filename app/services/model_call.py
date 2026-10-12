@@ -8,33 +8,17 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError,ErrorCode
+from app.core.http_client import get_http_client
 from app.services import api_key_service
 
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(35.0, connect=8.0)
-_shared_client: httpx.AsyncClient | None = None
 
 
 
-def start_http_client()->None:
-    global _shared_client
-    _shared_client = httpx.AsyncClient(
-        timeout=_TIMEOUT,
-        follow_redirects=False,
-        limits=httpx.Limits(max_connections=100,
-                            max_keepalive_connections=20,
-                            keepalive_expiry=60.0,
-                            ),
-    )
 
-async def stop_http_client()->None:
-    """lifespan 关闭时调用:释放连接池"""
-    global _shared_client
-    if _shared_client is not None:
-        await _shared_client.aclose()
-        _shared_client = None
 
 class ModelCallError(Exception):
     """模型调用错误,不携带响应体内容"""
@@ -74,14 +58,15 @@ async  def call_model(
         "Authorization": f"Bearer {record.api_key}",
         "Content-Type": "application/json",
     }
-    if _shared_client is None:
+    client = get_http_client()
+    if client is None:
         async with httpx.AsyncClient(
                 timeout=_TIMEOUT,
                 follow_redirects=False,
-            ) as client:
-            resp = await client.post(url, headers=headers, json=payload)
+            ) as one_off:
+            resp = await one_off.post(url, headers=headers, json=payload)
     else:
-        resp = await _shared_client.post(url, headers=headers, json=payload)
+        resp = await client.post(url, headers=headers, json=payload)
     if resp.status_code in(401, 403):
         await api_key_service.mark_invalid(record.key_id,user_id, session)
         raise ModelCallError(f"key 已被厂商拒绝，已标记为失效，请重新配置")
