@@ -42,7 +42,10 @@ async  def call_model(
         user_id: int,
         prompt: str,
         session:AsyncSession, *,
-        max_token: int | None = 1000)->tuple[str, str]:
+        # thinking 模型（deepseek-flash / v4-pro）的 reasoning_tokens 计入 completion_tokens：
+        # 1000 会被 reasoning 吃光导致 content 空串（实测 finish_reason=length），
+        # 5 条真实资料实测 reasoning≈2602 + JSON≈500，4000 留约 30% 余量
+        max_token: int | None = 4000)->tuple[str, str]:
     record = await api_key_service.key_for_call(user_id, session)
     try:
         await asyncio.to_thread(validate_public_url, record.base_url)

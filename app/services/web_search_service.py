@@ -10,11 +10,11 @@ _BOCHA_URL = "https://api.bocha.cn/v1/web-search"
 
 async def web_search(query:str,count:int=5)->list[dict]:
 
-    if not settings.BOCHA_API_KEY:
+    if not settings.bocha_api_key:
         raise BizError(ErrorCode.PARAM_INVALID, "BOCHA_API_KEY 未配置")
 
     headers = {
-        "Authorization": f"Bearer {settings.BOCHA_API_KEY}",
+        "Authorization": f"Bearer {settings.bocha_api_key}",
     }
     payload = {
         "query": query,

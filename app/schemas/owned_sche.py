@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.schemas.cart_sche import validate_image_path
 
 
 def normalize_purchased_at(value: datetime | None) -> datetime | None:
@@ -40,6 +42,11 @@ class OwnedItemInSchema(BaseModel):
     platform: str | None = Field(default=None, max_length=64)
     purchased_at: datetime | None = None
 
+    @field_validator("image")
+    @classmethod
+    def check_image(cls, v: str | None) -> str | None:
+        return validate_image_path(v)
+
     @model_validator(mode="after")
     def norm_purchased_at(self):
         self.purchased_at = normalize_purchased_at(self.purchased_at)
@@ -58,6 +65,11 @@ class OwnedItemUpdateSchema(BaseModel):
     note: str | None = Field(default=None, max_length=512)
     platform: str | None = Field(default=None, max_length=64)
     purchased_at: datetime | None = None
+
+    @field_validator("image")
+    @classmethod
+    def check_image(cls, v: str | None) -> str | None:
+        return validate_image_path(v)
 
     @model_validator(mode="after")
     def norm_purchased_at(self):

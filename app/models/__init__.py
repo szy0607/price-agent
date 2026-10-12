@@ -6,6 +6,7 @@ from .purchase_record import PurchaseRecord
 from .chat_message import ChatMessage
 from .user_profile import UserProfile
 from .user_api_key import UserApiKey
+from .image import Image
 __all__ = [
     "User",
     "UserSession",
@@ -15,4 +16,5 @@ __all__ = [
     "ChatMessage",
     "UserProfile",
     "UserApiKey",
+    "Image",
 ]

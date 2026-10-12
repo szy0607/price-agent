@@ -6,6 +6,7 @@ from app.core.errors import BizError, ErrorCode
 from app.models import CartItem, OwnedItem, PurchaseRecord
 from app.schemas.cart_sche import CartItemInSchema, CartItemUpdateSchema
 from app.schemas.purchase_sche import PurchaseInputSchema
+from app.services import image_service
 
 
 async def get_cart_by_user_id(user_id: int,session : AsyncSession)->list[CartItem]:
@@ -18,17 +19,23 @@ async def get_cart_by_user_id(user_id: int,session : AsyncSession)->list[CartIte
 async def add_cart_item(cart_item_in: CartItemInSchema,user_id: int,session : AsyncSession):
     item = CartItem(**cart_item_in.model_dump(),user_id=user_id)
     session.add(item)
+    if item.image:
+        await image_service.reference_image(item.image, session)
     await session.commit()
     await session.refresh(item)
     return item
 async def delete_cart_item(item_id: int,user_id: int,session : AsyncSession):
-    item = await session.execute(
-       delete(CartItem)
-       .where(CartItem.id == item_id, CartItem.user_id == user_id)
+    item = await session.scalar(
+        select(CartItem)
+        .where(CartItem.id == item_id, CartItem.user_id == user_id)
     )
-    if item.rowcount == 0:#type: ignore
+    if item is None:
         raise BizError(ErrorCode.PARAM_INVALID,"记录不存在")
+    released_path = item.image
+    await session.delete(item)
     await session.commit()
+    # 删完再判释放：此刻两张 item 表若都没人引用这张图，置 released 待清理
+    await image_service.release_if_unreferenced(released_path, session)
 async def update_cart_item(update_in:CartItemUpdateSchema,user_id: int,item_id: int,session : AsyncSession):
     item = await session.scalar(
         select(CartItem)
@@ -37,10 +44,15 @@ async def update_cart_item(update_in:CartItemUpdateSchema,user_id: int,item_id: 
     if item is None:
         raise BizError(ErrorCode.PARAM_INVALID,"记录不存在")
     changes = update_in.model_dump(exclude_unset=True)
+    old_image = item.image
     for key, value in changes.items():
         setattr(item, key, value)
     await session.commit()
     await session.refresh(item)
+    # 换了图：新的引用、旧的释放；没换图两个分支都自然跳过
+    if item.image and item.image != old_image:
+        await image_service.reference_image(item.image, session)
+        await image_service.release_if_unreferenced(old_image, session)
     return item
 
 async def transfer_to_owned_item(item_id: int,user_id: int,session : AsyncSession,extra:PurchaseInputSchema):

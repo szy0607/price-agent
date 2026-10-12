@@ -64,7 +64,7 @@
 
 | 场景 | 错误码 |
 |---|---|
-| `name` 空 / 超长 | 走 schema 校验（`min_length=1` + strip 校验器），FastAPI 默认 **422**——与现有 cart 接口口径一致，不走 40001 |
+| `name` 空 / 超长 | 走 schema 校验（`min_length=1` + strip 校验器），由全局异常处理器包装为 **400 + code=40001**（`app/core/errors.py` 的 `RequestValidationError` handler；全项目所有接口同一口径，2026-10-12 实测确认，原「FastAPI 默认 422」为落后口径）——不走 422 |
 | 搜索无结果（博查通了但 0 条） | 不报错：正常返回 `specs: {}`、`sources: []`，前端提示「没查到资料，请手动填写」 |
 | 用户四家 key 都没配 | 沿用 `ApiKeyService.key_for_call` 现有未配 key 行为（`KeyRecordError` → router 转 `PARAM_INVALID`） |
 | 博查 key 未配 / 搜索失败 / 模型失败 / JSON 解析失败 | `INTERNAL 50000`（服务端问题，提示用户稍后重试或手填） |
@@ -120,6 +120,14 @@
 7. 前端 CartView：name 非空才亮「AI 补全」按钮；返回后把 `name` / `category` / `price` / `specs` **直接回填进添加表单对应输入框**（用户自行核对修改），price 输入框旁固定提示「网络参考价，可能过时，以商品页实际价格为准；如有更低价请自行修改」，键名含 `(AI)` 的项渲染「来源：网络」徽标；用户点「添加」走现有 `POST /cart/items`
 
 **完成判据**：添加商品勾选 AI 补全 → 草稿带 `(AI)` 键填入表单并带来源徽标 → 用户确认入库后 `GET /cart/items` 里 specs 原样含 `(AI)` 键。
+
+## 4.5 实测补记（2026-10-12，四判据全 PASS）
+
+- **`web_search_service` 大小写坑**：`settings` 字段是小写 `bocha_api_key`（pydantic-settings 按字段名匹配 `.env`，大小写不敏感），代码里两处访问写成大写 `BOCHA_API_KEY` 均 AttributeError→500（第 13 行 if 判断 + 第 17 行 Bearer 头，改一处漏一处，第二次才抓全）。**教训：改重复字符串必须全局搜**。
+- **`call_model` 默认 `max_token` 1000 不够**：deepseek 两家合法模型（`deepseek-flash` / `deepseek-v4-pro`）是 thinking 模型，reasoning_tokens 计入 completion_tokens，5 条真实资料实测 reasoning≈2602，1000 必吃光（`finish_reason=length`、content 空串 → `json.loads("")` 炸）。默认值已改 4000（余量约 30%）。`call_model` 唯一调用方是本补全管线，chat 不走它。
+- **模型名会过时**：`DeepSeek-V4.1-Flash` 已被官方拒收（400 invalid_request_error），库里配置需跟上厂商模型清单；key 本身仍有效。
+- **博查任何 query 都返 5 条**（纯符号/乱码都有兜底），`if not results:` 分支真实不可达；「搜不到」的真实形态 = 资料与商品无关时模型输出空 specs（实测合规：`{"name":"","category":"","price":null,"specs":{}}`，`_clean_draft` 把空 name 回落为请求原名）。该分支只能靠 mock 单测覆盖。
+- 端到端验收（真实服务）：正常名 → 30 个 specs 键全带 `(AI)` + 5 条真实 URL（pconline/zol/qq/suning）；乱码名 → 空 specs 不报错；name 空/缺失 → 400+40001；未登录 → 401+40101。
 
 ## 5. 红线自查
 
