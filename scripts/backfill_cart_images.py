@@ -1,8 +1,28 @@
-"""一次性任务：为历史购物车商品补齐展示图（cart_item.image）。
+"""【一次性任务脚本 · 2026-10-12 已执行】为历史购物车商品补齐展示图。
 
-流程：从公开商品页下载产品图 → 走项目自带的 image_store.save_upload_image
-重编码(剥EXIF/压1280边)落盘到 uploads/ → 输出 item_id → /uploads/xxx.jpg 映射。
-图片落地后由人工核验，再回写数据库（见本脚本输出 JSON）。
+性质与背景
+----------
+- 图片上传链路上线前，cart_item.image 全为空；本脚本为当时存在的
+  cart_item（id 3~22，user 13）从公开商品页下载产品图并补齐。
+- 一次性任务：已执行完毕，保留作为操作留痕，可随时删除。
+- 未纳入 Git 提交；涉及的数据（uploads/ 文件 + 本地库记录）按
+  AGENTS.md §3 约定不同步，另一台电脑不会自动获得这些图片。
+
+流程
+----
+从公开商品页下载图片 → 走 image_store.save_upload_image 重编码
+（剥 EXIF、缩最长边 1280、JPEG）落盘 uploads/ → 输出 item_id 映射。
+图片落盘后由人工逐张核验，再回写 cart_item.image。
+
+注意事项
+--------
+- ITEMS 里的图片地址是当时搜索结果，可能随时间失效；换图需重新检索。
+- 换机器/换库跑：先确认目标库有对应 cart_item；跑完后需人工核验，
+  且**新链路要求图片在 image 表登记**（否则 GET /uploads/{name} 鉴权
+  会判「图片不存在」）——补登记请跑 scripts/fix_orphan_images.py。
+- 依赖：conda fast 环境 + 本机 MySQL（.env 的 DB_URL）+ 外网。
+
+运行：python scripts/backfill_cart_images.py
 """
 import json
 import sys

@@ -187,7 +187,7 @@ class TraceMiddleware:
 DB 连不上就是"服务器内部错误"，语义成立。
 
 > ⚠️ **不能走 `HTTPException(503)`**：`errors.py` 的 `_h_http` 不是"状态码换算公式"，而是查表
-> `code = _HTTP_TO_CODE.get(exc.status_code, ErrorCode.INTERNAL)`（`errors.py:72-75`）。
+> `code = _HTTP_TO_CODE.get(exc.status_code, ErrorCode.INTERNAL)`（`errors.py:76-79`）。
 > `_HTTP_TO_CODE`（`errors.py:30-37`）只登记了 400 / 401 / 403 / 404 / 405 / 429，**没有 503**，
 > 所以 503 只会落到兜底值 `ErrorCode.INTERNAL = 50000`。
 > 于是真走 `_h_http` 时 `code` 恰好也是 `50000`、外层 `status` 仍是 503，**看起来结果一致**——
@@ -233,6 +233,9 @@ DB 连不上就是"服务器内部错误"，语义成立。
 | `/health` **不记访问日志**（或降到 DEBUG） | 它会被探针每几秒调一次，会把日志刷爆、把真正有用的行淹掉 |
 | 将来加限流时，`/health` **必须白名单豁免** | 否则 LB 自己会被限流打挂（`42901`），**故障会被放大成"所有实例同时下线"** |
 
+> ⚠️ **实现与设计不一致（2026-10-12 核对）**：中间件对**每个请求（含 `/health`）都打 INFO**
+> （`app/core/middleware.py:51-58`），并没有把 `/health` 跳过或降到 DEBUG——**已登记代码欠账**。
+
 ---
 
 ## 5. 落地清单（文件 / 位置）
@@ -257,12 +260,15 @@ DB 连不上就是"服务器内部错误"，语义成立。
 
 ## 6. 验收标准
 
-- [ ] `GET /health` → `200`，体是信封，`data.status == "ok"`
-- [ ] **故意把 DB 停掉**（或改错密码）→ `/health` → **`503`**（不是 200，不是 500）
-- [ ] 正常请求 → 响应头有 `X-Trace-Id`，且与日志里打的 trace_id **一致**
-- [ ] **故意触发 500** → 响应头**也有** `X-Trace-Id`（这条是本文的核心产出）
-- [ ] 连打两次请求 → 两次的 trace_id **不同**
-- [ ] `/docs` 能打开（中间件没把非 http scope 弄崩）
+- [x] `GET /health` → `200`，体是信封，`data.status == "ok"`
+- [x] **故意把 DB 停掉**（或改错密码）→ `/health` → **`503`**（不是 200，不是 500）
+- [x] 正常请求 → 响应头有 `X-Trace-Id`，且与日志里打的 trace_id **一致**
+- [x] **故意触发 500** → 响应头**也有** `X-Trace-Id`（这条是本文的核心产出）
+- [x] 连打两次请求 → 两次的 trace_id **不同**
+- [x] `/docs` 能打开（中间件没把非 http scope 弄崩）
+
+> ✅ **已上线（2026-10-12 核对）**：`TraceMiddleware` 与 `health_router` 的挂载见 `app/main.py:54,57`；
+> 500 响应补 `X-Trace-Id` 的 `_h_exc` 见 `app/core/errors.py:80-86`。
 
 ---
 
@@ -525,6 +531,10 @@ def setup_logging(level: int = logging.INFO) -> None:
 > 所以**它们不会带 trace_id**，也不会被我们的 handler 接管（不会重复打印）。业务 logger（`app.*`）不受影响。
 > 要统一得改 uvicorn 的 `--log-config`，**本轮不做**。写完请扫一眼启动日志有没有重复行。
 
+> 📌 **后续已做（2026-10-12 核对）**：`app/main.py:41` 已在 `lifespan` 里把 `uvicorn.access` 设为 `WARNING`
+> （INFO 级访问行不再输出）——没走 `--log-config`，靠的是"uvicorn 的 dictConfig 在 import 应用之后、
+> startup 之前执行，只有 lifespan 里改才站得住"这个时序。访问日志由中间件的 `app.access` 统一打（见 §4.4 的欠账记录）。
+
 ### 9.4 `app/core/errors.py`（**改现有文件** · 两处）
 
 **改动 1 —— 给 `envelope()` 加 `headers` 参数**（handler 要能带响应头）：
@@ -557,7 +567,7 @@ def envelope(code:int,msg:str,http_status:int,data=None,headers:dict|None=None) 
 
 > ✅ **循环 import 检查**：`core/trace.py` 零依赖（只 import `contextvars`）→ `core/errors.py` import 它安全。
 
-> 📌 **实际实现与上面模板的差异（等价，不是缺陷）**：`app/core/errors.py:78-82` 的 `_h_exc` 在返回前多了一步
+> 📌 **实际实现与上面模板的差异（等价，不是缺陷）**：`app/core/errors.py:80-86` 的 `_h_exc` 在返回前多了一步
 > `if trace_id: set_trace_id(trace_id)` —— 即**把 `request.state` 里的 trace_id 重新写回 contextvar**（供日志 Filter 读取），
 > 这样那条 `logger.exception(...)` 与同一请求的后续日志也能带上 trace_id。
 > 相比模板只是"多复写了一次 contextvar"，**属等价实现**，最终响应头同样带 `X-Trace-Id`，不必视为偏离规格。
@@ -639,11 +649,20 @@ app.include_router(health_router)
 >   `RuntimeError: Cannot add middleware after an application has started`。模块级调用天然满足。
 > - 多个中间件时，**后 `add` 的在更外层**（Starlette 内部 `insert(0, ...)`）。现在只有一个，先记着。
 
+> 🔴 **已被实际装配取代（2026-10-12 核对）**：真实 `app/main.py` 现挂 **8 个 router**
+> （auth / purchase / health / cart / owned / setting / upload / image_file，`app/main.py:55-64`）
+> + `lifespan`（`app/main.py:37-49`：把 `uvicorn.access` 设为 WARNING、起 http client、图片清理定时任务）
+> + 自定义 `/docs`、`/redoc`（`app/main.py:70-86`，JS/CSS 走本地 StaticFiles）
+> + `app.mount("/static", StaticFiles(...))`（`app/main.py:67`）。上面模板只留作形状参考。
+
 ### 9.7 写完先自己跑这 6 条
 
-- [ ] `curl http://127.0.0.1:8000/health` → `200` + `{"code":0,"msg":"success","data":{"status":"ok"}}`
-- [ ] **停掉 MySQL**（或改错 `.env` 密码后重启）→ `/health` → **`503`**（不是 200、不是 500）
-- [ ] `curl -i http://127.0.0.1:8000/health` → 响应头有 `X-Trace-Id`
-- [ ] 随便打一个**会 500 的请求**（可临时加个 `/boom` 路由）→ 响应头**也有** `X-Trace-Id`
-- [ ] 连打两次 → 两次的 `X-Trace-Id` **不同**
-- [ ] 日志里每条业务日志都带 `[...]` 里那块 trace_id，且与响应头一致
+- [x] `curl http://127.0.0.1:8000/health` → `200` + `{"code":0,"msg":"success","data":{"status":"ok"}}`
+- [x] **停掉 MySQL**（或改错 `.env` 密码后重启）→ `/health` → **`503`**（不是 200、不是 500）
+- [x] `curl -i http://127.0.0.1:8000/health` → 响应头有 `X-Trace-Id`
+- [x] 随便打一个**会 500 的请求**（可临时加个 `/boom` 路由）→ 响应头**也有** `X-Trace-Id`
+- [x] 连打两次 → 两次的 `X-Trace-Id` **不同**
+- [x] 日志里每条业务日志都带 `[...]` 里那块 trace_id，且与响应头一致
+
+> ✅ **已上线（2026-10-12 核对）**：六条均已在真实代码中落地——中间件 / 健康检查挂载见 `app/main.py:54,57`，
+> 异常处理器补 `X-Trace-Id` 头见 `app/core/errors.py:80-86`。

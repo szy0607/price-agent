@@ -84,7 +84,7 @@ httpx
 
 ## 3. 核心：异步怎么拿到 session（标准写法）
 
-### 3.1 定义（`app/db/session.py`）
+### 3.1 定义（`app/database/session.py`）
 
 ```python
 from collections.abc import AsyncGenerator
@@ -115,7 +115,7 @@ SessionLocal = async_sessionmaker(
 )
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with SessionLocal() as session:
         try:
             yield session
@@ -123,6 +123,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
 ```
+
+> 📌 **实际落点（2026-10-12 核对）**：engine / sessionmaker 在 `app/database/session.py`（变量名 `async_engine` / `async_session_local`）；
+> 依赖函数 `get_db_session()` 在 **`app/dependence.py:14`**，并不在 session.py 里。
 
 ### 3.2 在路由里用（依赖注入）
 
@@ -132,9 +135,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_session
+from app.dependence import get_db_session
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 @router.post("/register", status_code=201)
@@ -176,6 +179,7 @@ async def register(session: AsyncSession, payload: RegisterReq):
 3. **同一 session 不能并发**：别在 `asyncio.gather` 里共用同一个 session。
 4. **驱动依赖**：异步必须 `aiomysql`；SQLAlchemy async 还要 `greenlet`；MySQL 8 认证要 `cryptography`。
 5. **连接串**：`mysql+aiomysql://...?charset=utf8mb4`（不是 `mysql+pymysql`）。
+   📌 **口径更新（2026-10-12）**：库级 `utf8mb4` 已统一（建库语句见 `AGENTS.md` §7），**连接层不声明 charset**——以代码为准（`.env.example:17` 的 `DB_URL` 不带 `?charset=`）。
 
 ---
 
@@ -221,7 +225,10 @@ settings = Settings()
 ```
 > 字段名 `db_url` / `db_echo` 自动匹配环境变量 `DB_URL` / `DB_ECHO`（大小写不敏感）。
 
-**`app/db/base.py`** —— 只做"ORM 元数据基类"
+> ⚠️ **未落地为配置项（2026-10-12 核对）**：`db_echo` 与 `session_ttl_seconds` 在 `app/core/config.py` 中**均不存在**；
+> `app/database/session.py:6` 仍**硬编码 `echo=False`**——已登记代码欠账。
+
+**`app/database/base.py`** —— 只做"ORM 元数据基类"
 
 ```python
 from sqlalchemy import MetaData
@@ -240,7 +247,7 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 ```
 
-**`app/db/session.py`** —— 只做"连接与 session"
+**`app/database/session.py`** —— 只做"连接与 session"
 
 ```python
 from collections.abc import AsyncGenerator
@@ -268,7 +275,7 @@ SessionLocal = async_sessionmaker(
 )
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with SessionLocal() as session:
         try:
             yield session
@@ -276,6 +283,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
 ```
+
+> 📌 **实际落点（2026-10-12 核对）**：engine / sessionmaker 在 `app/database/session.py`（`async_engine` / `async_session_local`）；
+> 依赖函数 `get_db_session()` 在 **`app/dependence.py:14`**。另：`echo` 未走配置项，`session.py:6` 硬编码 `echo=False`（见上文 config 示例后的欠账标注）。
 
 ### 6.2 为什么必须拆（三条硬理由）
 
@@ -657,13 +667,13 @@ DB_URL=Y python -c "from app.config import Settings; print(Settings().db_url)"  
 | 🔴 | `.env` | 已**不再被跟踪**（`git ls-files` 不含 `.env`，`.gitignore` 已含它）；**但历史仍留痕**（提交 `69fb606`；remote `github.com/szy0607/price-agent`），内含 MySQL `root` 密码 | ✅ 已完成 `git rm --cached .env`；**密码仍需更换**（历史已留痕，仅 untrack 不够） |
 | 🔴 | `.env` | 应用用 **`root`** 连库，违反契约 §9.3「专用最小权限账号」 | 建 `price_agent` 账号并切 `.env` |
 | 🔴 | `app/models/user.py` | 字段仍是旧版：`user_email`/`username`/`create_time` 命名不符；`id` 是 `Integer` 而非 `BigInteger` | 按契约 §1.1 **重写为 5 字段**（不再补 `nickname`/`status`/`updated_at`/`deleted_at`） |
-| 🔴 | `app/schemas/user_sche.py` | 被清空成只剩两行 import | 至少落一个**不含 `password_hash`** 的 `UserResp` |
+| ✅ | `app/schemas/user_sche.py` | ~~被清空成只剩两行 import~~ | ✅ 已落 `UserResponse`（`app/schemas/user_sche.py:18-26`，**不含 `password_hash`**） |
 | 🔴 | `app/router/{register,log_in}.py` | 前缀仍是 `/register`、`/login`；函数体 `pass` | ✅ 已实现。⚠️ 2026-09-23 前缀口径**改为 `/auth/*`**（按代码回写契约，不挂 `/api/v1`，见契约 §2.0） |
 | 🔴 | `app/main.py` | 只有 2 行，无 `include_router` | 挂载路由 + trace_id 中间件 + `/health` |
 | ✅ | `app/models/` | ~~目录名用单数~~ 已是复数（契约 §4.3 要求） | ✅ 已完成：`model/` → `models/` |
 | 🟡 | `app/database/session.py` | sessionmaker 缺 `class_=AsyncSession`、`autoflush=False` | 按 §3.1 标准写法补齐 |
 | 🟡 | `.gitignore` | 前三项（`.venv/`、`__pycache__/`、`*.py[cod]`）**已补上**；现在**只缺 `.pytest_cache/`** | 补上 `.pytest_cache/` |
-| 🟡 | `app/repository/`、`app/services/`、`app/api/` | `repository/auth_repo.py` **已建且被 `log_in.py` 使用**；`services/`、`api/` 仍是空占位（只有 `__init__.py`） | `services/` 待建 |
+| 🟡 | `app/repository/`、`app/services/`、`app/api/` | `repository/` 已建 **auth_repo / cart_repo / owned_repo 三文件**且被路由使用；`services/` **已建 8 模块**；`api/` 仍是空占位（只有 `__init__.py`） | ✅ `services/` 已建 8 模块（`app/services/`：api_key_service / image_service / image_store / model_call / product_page / spec_complete_service / user_profile / web_search_service；`app/main.py:21` 已 import 使用其中三个）；`app/api/` 仍空占位 |
 | 🟢 | `users` 表 | **尚不存在**（实测 `Table 'price_agent.users' doesn't exist`） | 建表前务必 `import models`，否则 `create_all()` 一声不响什么都不建 |
 
 ### 10.3 本轮最有价值的一条经验：参数挂错对象 = 静默失效
@@ -773,9 +783,8 @@ async def login(payload: LoginReq, session: SessionDep):
    **另需注意**：强度校验按**字符数**限长（18），bcrypt 按**字节**截断（72）——两者单位不同，
    见下方第 5 条。
 3. **密码长度口径不一致**——`.env` 是 **6~18**，契约 §2.1 是 **8–64**。
-4. **防用户枚举没做**——`get_pw_hash` 对「用户不存在」与「密码错」给不同信息。
-   更隐蔽的是**时间差**：不存在时 0ms（不跑 bcrypt），密码错时 188ms，
-   响应时间本身就是枚举信道。实现指引 §10 第⑤条已明确要求两条路径**完全一致**。
+4. **防用户枚举——文案已统一，时间差信道仍开放**：`log_in.py:32-35` 与 `auth_repo.py:14,20` 已共用同一 `CREDENTIALS` +「邮箱或密码错误」，「用户不存在」与「密码错」对外信息一致；
+   但用户不存在时不跑 bcrypt（0ms）、密码错时约 188ms，**时间差信道仍开放**——已登记代码欠账。实现指引 §10 第⑤条已明确要求两条路径**完全一致**。
 5. **🔴 两个不同的密码会被判定为同一个**（2026-09-21 实测，此前未发现）
 
    | | 密码 | 字符数 | 字节数 |
@@ -809,14 +818,15 @@ async def login(payload: LoginReq, session: SessionDep):
 
 ### 11.5 与本文件既有约定的冲突
 
-实现指引 §10.1 已拍板 **本轮不加 repository 层**，但 `app/repository/auth_repo.py` 已建。
+实现指引 §10.1 原拍板 **本轮不加 repository 层**，但 `app/repository/auth_repo.py` 已建。
 该节早已预警两个连带坑，**这次两条全中**：
 
 1. **事务边界碎掉**——`login` 写 `last_login_at`、`register` 的「查重 + 插入 + 唯一索引兜底」，
    都必须**同一个 session 内**完成；repo 每个函数各开一个 session，做不到。
 2. **契约漂移**——§4.1 分层是 `api → services → db/models`，加一层属于改架构。
 
-处理方式二选一：**删掉 repo 走 service 层**（推荐），或**先改契约再动代码**（`开发流程.md` §5）。
+> ✅ **repo 层去留已拍板（大宋 2026-09-23 定）：保留，待调用点变多**（见 `docs/注册登录-实现指引.md` §10.1）。
+> `app/repository/` 亦已从 `auth_repo.py` 单文件扩展为 **auth_repo / cart_repo / owned_repo 三文件**。
 
 ### 11.6 环境事故（2026-09-21）：`.venv` 被 pip 装坏
 
