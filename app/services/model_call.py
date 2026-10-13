@@ -23,6 +23,15 @@ _TIMEOUT = httpx.Timeout(35.0, connect=8.0)
 class ModelCallError(Exception):
     """模型调用错误,不携带响应体内容"""
 
+def _log_truncation(data: dict)->None:
+    usage = data.get("usage") or {}
+    detail = usage.get("completion_tokens_details") or {}
+    logger.warning(
+        "model output truncated: completion=%s reasoning=%s",
+        usage.get("completion_tokens"),
+        detail.get("reasoning_tokens"),
+    )
+
 def validate_public_url(base_url: str)->None:
     """验证公共URL是否有效"""
     parsed = urlparse(base_url)
@@ -42,10 +51,7 @@ async  def call_model(
         user_id: int,
         prompt: str,
         session:AsyncSession, *,
-        # thinking 模型（deepseek-flash / v4-pro）的 reasoning_tokens 计入 completion_tokens：
-        # 1000 会被 reasoning 吃光导致 content 空串（实测 finish_reason=length），
-        # 5 条真实资料实测 reasoning≈2602 + JSON≈500，4000 留约 30% 余量
-        max_token: int | None = 4000)->tuple[str, str]:
+        max_token: int | None = 6000)->tuple[str, str]:
     record = await api_key_service.key_for_call(user_id, session)
     try:
         await asyncio.to_thread(validate_public_url, record.base_url)
@@ -73,16 +79,23 @@ async  def call_model(
     if resp.status_code in(401, 403):
         await api_key_service.mark_invalid(record.key_id,user_id, session)
         raise ModelCallError(f"key 已被厂商拒绝，已标记为失效，请重新配置")
+    if resp.status_code == 402:
+        logger.warning("model call rejected: http 402 provider=%s body=%s",
+                       record.provider, resp.text[:200])
+        raise ModelCallError("模型服务已欠费，请前往对应平台充值后重试")
     if resp.status_code != 200:
         logger.warning("model call http %s ", resp.status_code)
         raise ModelCallError(f"模型调用失败")
     try:
         data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = choice["finish_reason"] or ""
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         logger.warning("model call unexpected response shape")
         raise ModelCallError("模型返回了无法解析的内容") from exc
     if not isinstance(content, str):
         raise ModelCallError("模型返回了无法解析的内容")
-
+    if finish_reason == "length":
+        _log_truncation(data)
     return content, data.get("model") or record.model_name

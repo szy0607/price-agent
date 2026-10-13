@@ -19,8 +19,9 @@ _PROMPT_TEMPLATE = """
    其中 name 是规范全名，category 是简短分类（如 耳机、手机、键盘），资料判断不出就填 null；
    price 只能是搜索资料里明确出现的公开标价（单个数字，单位元），资料里没有明确价格就填 null，不要估算；
    specs 里每个键名必须以 (AI) 结尾；
-3. 不要输出任何优惠、库存、购买链接；
-4. 只输出 JSON 本身，不要解释。
+3. specs 最多 8 条，只挑最关键的参数；
+4. 不要输出任何优惠、库存、购买链接；
+5. 只输出 JSON 本身，不要解释。
 
 搜索资料：
 {materials}
@@ -65,7 +66,7 @@ async def complete_specs(name:str,category: str |None,user_id:int ,session:Async
     try:
         content,model = await model_call.call_model(user_id,_build_prompt(name,results),session)
     except model_call.ModelCallError as exc:
-        raise BizError(ErrorCode.INTERNAL,"模型调用失败，请稍后重试或手动填写") from exc
+        raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
     try:
         draft = json.loads(content)
         if not isinstance(draft,dict):

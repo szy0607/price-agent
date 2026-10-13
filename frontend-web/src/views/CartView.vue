@@ -1,9 +1,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { PhArrowRight, PhCheck, PhMagicWand, PhPlus, PhShoppingCart, PhTrash, PhX } from '@phosphor-icons/vue'
+import { PhCheck, PhMagicWand, PhPlus, PhShoppingCart, PhTrash, PhX } from '@phosphor-icons/vue'
 import { completeCartItemDraft, createCartItem, deleteCartItem, listCartItems, resolveImageUrl, transferCartItem, updateCartItem, uploadImage } from '../utils/api'
-const router = useRouter(); const items = ref([]); const loading = ref(true); const saving = ref(false); const aiCompleting = ref(false); const selectedIds = ref([]); const editingId = ref(null); const showForm = ref(false); const toast = ref(''); const aiMessage = ref(''); const aiSources = ref([]); const uploading = ref(false); const fileInput = ref(null)
+const items = ref([]); const loading = ref(true); const saving = ref(false); const aiCompleting = ref(false); const editingId = ref(null); const showForm = ref(false); const toast = ref(''); const aiMessage = ref(''); const aiSources = ref([]); const uploading = ref(false); const fileInput = ref(null)
 const form = reactive({ name: '', category: '', price: '', specsText: '', image: '', note: '' })
 const placeholderImage = `${import.meta.env.BASE_URL}images/placeholder-item.png`
 const page = ref(1); const pageSize = 10
@@ -19,7 +18,7 @@ function imageFallback(event) { event.target.src = placeholderImage }
 const aiSpecKeys = computed(() => Object.keys(specsFromText(form.specsText)).filter((key) => key.endsWith('(AI)')))
 function resetAiState() { aiMessage.value = ''; aiSources.value = [] }
 function resetForm() { editingId.value = null; Object.assign(form, { name: '', category: '', price: '', specsText: '', image: '', note: '' }); resetAiState(); showForm.value = true }
-function closeForm() { if (!saving.value) showForm.value = false }
+function closeForm() { if (!saving) showForm.value = false }
 function edit(item) { editingId.value = item.id; Object.assign(form, { name: item.name, category: item.category || '', price: item.price ?? '', specsText: specsText(item.specs), image: item.image || '', note: item.note || '' }); resetAiState(); showForm.value = true }
 async function completeWithAi() {
   if (!form.name.trim() || aiCompleting.value) return
@@ -43,11 +42,10 @@ async function uploadImageFile(event) {
   catch (error) { notify(error.message || '上传失败') }
   finally { uploading.value = false }
 }
-async function refresh() { loading.value = true; try { items.value = await listCartItems(); page.value = Math.min(page.value, Math.max(1, Math.ceil(items.value.length / pageSize))); selectedIds.value = selectedIds.value.filter((id) => items.value.some((item) => item.id === id)) } catch (error) { notify(error.message || '购物车读取失败') } finally { loading.value = false } }
+async function refresh() { loading.value = true; try { items.value = await listCartItems(); page.value = Math.min(page.value, Math.max(1, Math.ceil(items.value.length / pageSize))) } catch (error) { notify(error.message || '购物车读取失败') } finally { loading.value = false } }
 async function save() { if (!form.name.trim() || saving.value) return; if (form.image.trim() && !validImageUrl(form.image.trim())) { notify('图片地址无效：http/https 链接或本地上传路径'); return } saving.value = true; const payload = { name: form.name.trim(), category: form.category.trim() || '其他', price: form.price === '' ? null : Number(form.price), specs: specsFromText(form.specsText), image: form.image.trim() || null, note: form.note.trim() || null }; try { if (editingId.value) await updateCartItem(editingId.value, payload); else await createCartItem(payload); showForm.value = false; editingId.value = null; await refresh(); notify('已保存') } catch (error) { notify(error.message || '保存失败') } finally { saving.value = false } }
 async function remove(item) { try { await deleteCartItem(item.id); await refresh(); notify('已移除') } catch (error) { notify(error.message || '删除失败') } }
 async function purchase(item) { try { await transferCartItem(item.id, { price: item.price, platform: null, purchased_at: new Date().toISOString(), note: item.note }); await refresh(); notify('已移入物品库') } catch (error) { notify(error.message || '移入失败') } }
-function consultSelected() { if (selectedIds.value.length) router.push({ path: '/chat', query: { items: selectedIds.value.join(',') } }) }
 onMounted(refresh)
 </script>
 <template>
@@ -55,9 +53,8 @@ onMounted(refresh)
     <div class="flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-7 dark:border-zinc-800"><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Cart</p><h1 class="mt-2 text-2xl font-semibold text-zinc-950 dark:text-white">购物车</h1><p class="mt-2 text-sm text-zinc-500">保存待购买的商品参数，确认购买后可移入物品库。</p></div><button type="button" class="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-white" @click="resetForm"><PhPlus :size="17" />新增商品</button></div>
     <div class="mt-7">
       <section aria-label="待购买商品">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3">
           <h2 class="text-sm font-semibold">待购买商品 <span class="ml-1 text-zinc-400">{{ items.length }}</span></h2>
-          <button type="button" :disabled="!selectedIds.length" class="inline-flex items-center gap-1 text-sm text-accent disabled:opacity-40" @click="consultSelected">带进咨询 <PhArrowRight :size="16" /></button>
         </div>
         <div v-if="loading" class="rounded-2xl border bg-white px-6 py-16 text-center text-sm text-zinc-500">正在读取…</div>
         <div v-else-if="!items.length" class="rounded-2xl border border-dashed bg-white px-6 py-16 text-center dark:bg-zinc-900">
@@ -73,7 +70,6 @@ onMounted(refresh)
                 <h3 class="mt-1 break-words font-semibold text-zinc-900 dark:text-white">{{ item.name }}</h3>
                 <p class="mt-2 text-sm font-semibold">{{ item.price == null ? '—' : `${item.price} 元` }}</p>
               </div>
-              <input v-model="selectedIds" :value="item.id" type="checkbox" :aria-label="`选择 ${item.name}`" class="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
             </div>
             <div v-if="Object.keys(item.specs || {}).length" class="mt-4 flex flex-wrap gap-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <span v-for="(value, key) in item.specs" :key="key" class="max-w-full break-words rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{{ key }} {{ value }}<em v-if="key.endsWith('(AI)')" class="ml-1 not-italic text-blue-600 dark:text-blue-300">来源：网络</em></span>

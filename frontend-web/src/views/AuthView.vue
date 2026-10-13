@@ -1,10 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhArrowsLeftRight, PhChatCircleDots, PhCheckCircle, PhEye, PhEyeSlash, PhLightning, PhTag } from '@phosphor-icons/vue'
+import { PhArrowLeft, PhCheckCircle, PhEye, PhEyeSlash, PhLightning } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import { getCaptcha, getCurrentUser, loginUser, registerUser } from '../utils/api'
-import { bestPlat, cheapest, PLATFORMS, PLAT_KEYS, products } from '../mock/data'
 import { setAuthUser } from '../utils/auth'
 
 const router = useRouter()
@@ -16,48 +15,25 @@ const showPassword = ref(false)
 const pending = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
-// 图形验证码：后端一次下发 token + 图片（自研无状态方案，见契约 §2.5；token 只有 120 秒有效期）
 const captcha = ref({ token: '', image: '' })
 const captchaLoading = ref(false)
 
-const isRegister = computed(() => mode.value === 'register')
-const showcaseProduct = products[0]
-const showcaseBest = bestPlat(showcaseProduct)
-const showcasePlat = showcaseBest.plat
-const showcaseRecommendation = `目前券后价最低的是${PLATFORMS[showcasePlat].name}（¥${showcaseBest.price}），下单前请确认优惠条件和页面实时价格。`
-const showcasePriceSummary = PLAT_KEYS.map((platform) => `${PLATFORMS[platform].name} ¥${cheapest(showcaseProduct, platform).prices[platform].b}`).join(' · ')
-const showcaseInsights = [
-  { label: '最低到手', value: `¥${showcaseBest.price}`, detail: `${PLATFORMS[showcasePlat].name} · ${showcaseBest.sku.name}` },
-  { label: '可比平台', value: `${PLAT_KEYS.length} 个`, detail: '淘宝 · 京东 · 拼多多' },
-  { label: '建议动作', value: '先咨询', detail: '按预算和场景筛选' },
+const isRegister = () => mode.value === 'register'
+
+// 首页展示用的静态演示商品（不依赖登录态；图片在 public/images/ 下，未登录可访问）。
+// 登录后这些位置会换成用户自己的物品库/购物车数据。
+const demoProducts = [
+  { id: 1, category: '数码', name: 'Apple iPhone 15 Pro 256G 原色钛金属', price: 8999, image: `${import.meta.env.BASE_URL}images/demo-iphone.jpg`, note: 'A17 Pro · 4800 万像素' },
+  { id: 2, category: '数码影音', name: 'Sony WH-1000XM5 无线降噪耳机', price: 2399, image: `${import.meta.env.BASE_URL}images/demo-headphone.jpg`, note: '8 麦克风降噪 · LDAC' },
+  { id: 3, category: '潮流玩具', name: '乐高 保时捷 911 GT3 RS 积木', price: 1999, image: `${import.meta.env.BASE_URL}images/demo-lego.jpg`, note: '1:8 复刻 · 2704 块' },
+  { id: 4, category: '家居水具', name: '星巴克 经典女神随行杯 473ml', price: 129, image: `${import.meta.env.BASE_URL}images/demo-cup.jpg`, note: '不锈钢保温 · 473ml' },
 ]
-const responseSteps = [
-  { agent: 'A1', icon: PhChatCircleDots, title: '拆解需求', detail: '预算不超过 ¥3,000，通勤使用，优先关注降噪体验。' },
-  { agent: 'A2', icon: PhArrowsLeftRight, title: '匹配商品与款式', detail: `找到「${showcaseProduct.name}」，核对颜色、版本与核心规格。` },
-  { agent: 'A3', icon: PhTag, title: '核对平台价格', detail: `读取活动和券后价：${showcasePriceSummary}。` },
-  { agent: 'A5', icon: PhLightning, title: '整理推荐依据', detail: `当前${PLATFORMS[showcasePlat].name}报价更低，并标明需要确认的优惠条件。` },
-]
-const capabilities = [
-  { icon: PhChatCircleDots, title: '智能咨询', desc: '直接说预算、使用场景或粘贴商品链接，Agent 会帮你拆解需求并给出建议。' },
-  { icon: PhArrowsLeftRight, title: '物品库与参数', desc: '保存家里已有的耳机、保温杯和日用品，随时回看规格与购买记录。' },
-  { icon: PhTag, title: '购物车与优惠', desc: '把候选商品集中放进购物车，核对公开价、券后价和优惠门槛再决定。' },
-]
-const ringCards = Array.from({ length: 37 }, (_, index) => ({
-  id: index,
-  image: products[index % products.length].image,
-  alt: index === 0 ? products[0].name : '',
-}))
-const cartShowcase = products.flatMap((product, index) => product.skus.slice(0, 2).map((sku, skuIndex) => ({
-  id: `${product.id}-${skuIndex}`,
-  product,
-  sku,
-  quantity: index % 2 + 1,
-  platform: PLAT_KEYS[(index + skuIndex) % PLAT_KEYS.length],
-})))
+const showcase = demoProducts[0]
+
 const activeSection = ref('auth-form-section')
 const sectionLinks = [
   { id: 'auth-form-section', label: '登录' },
-  { id: 'product-library', label: '商品库' },
+  { id: 'product-library', label: '示例商品' },
   { id: 'cart-showcase', label: '购物车' },
   { id: 'chat-placeholder', label: '智能咨询' },
   { id: 'spending-placeholder', label: '消费记录' },
@@ -87,9 +63,8 @@ function switchMode(nextMode) {
   router.replace({ query: { ...(nextMode === 'register' ? { mode: 'register' } : {}), ...(redirect ? { redirect } : {}) } })
 }
 
-// 打开页面即取一次验证码（只有登录才需要；注册接口不带验证码字段）
 onMounted(() => {
-  if (!isRegister.value) loadCaptcha()
+  if (!isRegister()) loadCaptcha()
   sectionObserver = new IntersectionObserver((entries) => {
     const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
     if (visible) activeSection.value = visible.target.id
@@ -98,44 +73,37 @@ onMounted(() => {
 })
 onBeforeUnmount(() => sectionObserver?.disconnect())
 
-function focusLoginForm() {
-  const formSection = document.getElementById('auth-form-section')
-  formSection?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  window.setTimeout(() => formSection?.querySelector('input')?.focus(), 350)
-}
-
 async function submit() {
   errorMessage.value = ''
   successMessage.value = ''
   const email = form.value.user_email.trim()
   const password = form.value.password
 
-  if (!email || !password || (isRegister.value && !form.value.username.trim())) {
+  if (!email || !password || (isRegister() && !form.value.username.trim())) {
     errorMessage.value = '请填写完整信息'
     return
   }
-  if (isRegister.value && password !== form.value.confirmPassword) {
+  if (isRegister() && password !== form.value.confirmPassword) {
     errorMessage.value = '两次输入的密码不一致'
     return
   }
-  if (!isRegister.value && !captcha.value.token) {
+  if (!isRegister() && !captcha.value.token) {
     errorMessage.value = '验证码未加载，请点击图片重试'
     return
   }
-  if (!isRegister.value && !form.value.captcha_code.trim()) {
+  if (!isRegister() && !form.value.captcha_code.trim()) {
     errorMessage.value = '请输入验证码'
     return
   }
 
   pending.value = true
   try {
-    if (isRegister.value) {
+    if (isRegister()) {
       await registerUser({ user_email: email, username: form.value.username.trim(), password })
       successMessage.value = '注册成功，请使用新账号登录'
       form.value.password = ''
       form.value.confirmPassword = ''
       switchMode('login')
-      successMessage.value = '注册成功，请使用新账号登录'
     } else {
       await loginUser({
         user_email: email,
@@ -149,8 +117,7 @@ async function submit() {
     }
   } catch (error) {
     errorMessage.value = error.message || '请求失败，请稍后重试'
-    // 失败就换一张：token 可能已过期（120 秒），或这次答案已经用掉了机会
-    if (!isRegister.value) loadCaptcha()
+    if (!isRegister()) loadCaptcha()
   } finally {
     pending.value = false
   }
@@ -178,34 +145,65 @@ async function submit() {
         <p>从智能咨询、物品库到购物车，把商品参数、平台价格和优惠条件放在一个地方看懂。</p>
         <a href="#auth-form-section" class="vertex-btn vertex-btn--hero"><span>登录，开始咨询</span></a>
         <div class="vertex-product-preview">
-          <img :src="showcaseProduct.image" :alt="showcaseProduct.name" />
-          <div><span>正在比较</span><strong>{{ showcaseProduct.name }}</strong><small>{{ showcaseProduct.brand }} · {{ showcaseProduct.category }}</small></div>
-          <div class="vertex-product-prices"><b v-for="pk in PLAT_KEYS" :key="pk">{{ PLATFORMS[pk].name }} <em>¥{{ cheapest(showcaseProduct, pk).prices[pk].b }}</em></b></div>
+          <img :src="showcase.image" :alt="showcase.name" />
+          <div><span>示例商品</span><strong>{{ showcase.name }}</strong><small>{{ showcase.note }}</small></div>
+          <div class="vertex-product-prices"><b>参考价 <em>¥{{ showcase.price }}</em></b></div>
         </div>
         <div class="vertex-insight-grid">
-          <article v-for="item in showcaseInsights" :key="item.label"><small>{{ item.label }}</small><strong>{{ item.value }}</strong><span>{{ item.detail }}</span></article>
+          <article><small>支持平台</small><strong>3 个</strong><span>淘宝 · 京东 · 拼多多</span></article>
+          <article><small>能力</small><strong>AI 咨询</strong><span>按预算和场景筛选</span></article>
+          <article><small>数据</small><strong>参数库</strong><span>已购商品档案化</span></article>
         </div>
       </div>
 
       <section id="auth-form-section" class="vertex-auth-panel">
         <button type="button" class="vertex-back" @click="router.back"><PhArrowLeft :size="15" /> 返回</button>
-        <div class="vertex-panel-heading"><span>SECURE ACCESS</span><h2>{{ isRegister ? '创建你的账号' : '欢迎回来' }}</h2><p>{{ isRegister ? '注册后即可开始购物咨询。' : '登录后继续你的购物咨询。' }}</p></div>
-        <div class="vertex-tabs" role="tablist"><button type="button" :class="{ active: !isRegister }" @click="switchMode('login')">登录</button><button type="button" :class="{ active: isRegister }" @click="switchMode('register')">注册</button></div>
+        <div class="vertex-panel-heading"><span>SECURE ACCESS</span><h2>{{ isRegister() ? '创建你的账号' : '欢迎回来' }}</h2><p>{{ isRegister() ? '注册后即可开始购物咨询。' : '登录后继续你的购物咨询。' }}</p></div>
+        <div class="vertex-tabs" role="tablist"><button type="button" :class="{ active: !isRegister() }" @click="switchMode('login')">登录</button><button type="button" :class="{ active: isRegister() }" @click="switchMode('register')">注册</button></div>
         <form @submit.prevent="submit">
-          <label v-if="isRegister" class="vertex-label">用户名<input v-model="form.username" type="text" autocomplete="username" maxlength="50" placeholder="怎么称呼你" /></label>
+          <label v-if="isRegister()" class="vertex-label">用户名<input v-model="form.username" type="text" autocomplete="username" maxlength="50" placeholder="怎么称呼你" /></label>
           <label class="vertex-label">邮箱<input v-model="form.user_email" type="email" autocomplete="email" placeholder="you@example.com" /></label>
-          <label class="vertex-label">密码<span class="vertex-password"><input v-model="form.password" :type="showPassword ? 'text' : 'password'" :autocomplete="isRegister ? 'new-password' : 'current-password'" placeholder="6–18 位，含字母和数字" /><button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><PhEyeSlash v-if="showPassword" :size="18" /><PhEye v-else :size="18" /></button></span></label>
-          <label v-if="isRegister" class="vertex-label">确认密码<input v-model="form.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" /></label>
-          <label v-if="!isRegister" class="vertex-label">验证码<span class="vertex-captcha"><input v-model="form.captcha_code" type="text" autocomplete="off" maxlength="4" placeholder="输入图中的 4 位字符" /><button type="button" :disabled="captchaLoading" aria-label="点击刷新验证码" @click="loadCaptcha"><img v-if="captcha.image" :src="captcha.image" alt="验证码，点击可刷新" /><span v-else>{{ captchaLoading ? '加载中' : '点击加载' }}</span></button></span></label>
+          <label class="vertex-label">密码<span class="vertex-password"><input v-model="form.password" :type="showPassword ? 'text' : 'password'" :autocomplete="isRegister() ? 'new-password' : 'current-password'" placeholder="6–18 位，含字母和数字" /><button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><PhEyeSlash v-if="showPassword" :size="18" /><PhEye v-else :size="18" /></button></span></label>
+          <label v-if="isRegister()" class="vertex-label">确认密码<input v-model="form.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" /></label>
+          <label v-if="!isRegister()" class="vertex-label">验证码<span class="vertex-captcha"><input v-model="form.captcha_code" type="text" autocomplete="off" maxlength="4" placeholder="输入图中的 4 位字符" /><button type="button" :disabled="captchaLoading" aria-label="点击刷新验证码" @click="loadCaptcha"><img v-if="captcha.image" :src="captcha.image" alt="验证码，点击可刷新" /><span v-else>{{ captchaLoading ? '加载中' : '点击加载' }}</span></button></span></label>
           <p v-if="errorMessage" class="vertex-message vertex-message--error" role="alert">{{ errorMessage }}</p><p v-if="successMessage" class="vertex-message vertex-message--ok" role="status"><PhCheckCircle :size="16" />{{ successMessage }}</p>
-          <button type="submit" class="vertex-submit" :disabled="pending"><PhLightning :size="16" weight="bold" />{{ pending ? '提交中' : (isRegister ? '创建账号' : '登录，继续咨询') }}</button>
+          <button type="submit" class="vertex-submit" :disabled="pending"><PhLightning :size="16" weight="bold" />{{ pending ? '提交中' : (isRegister() ? '创建账号' : '登录，继续咨询') }}</button>
         </form>
         <p class="vertex-legal">不代下单，不代支付。最后决定始终由你掌握。</p>
       </section>
     </section>
 
-    <section id="product-library" class="vertex-content-section vertex-library"><div class="vertex-section-heading"><span class="vertex-kicker">PRODUCT LIBRARY</span><h2>你的商品库</h2><p>把常买、想买和正在比较的商品放在一起，参数与价格一眼可见。</p></div><div class="vertex-library-grid"><article v-for="product in products" :key="product.id" class="vertex-library-card"><div class="vertex-library-card__image"><img :src="product.image" :alt="product.name" /></div><div class="vertex-library-card__body"><span>{{ product.category }}</span><h3>{{ product.name }}</h3><p>{{ product.brand }} · {{ product.model }}</p><div class="vertex-library-card__price"><strong>¥{{ bestPlat(product).price }}</strong><small>{{ PLATFORMS[bestPlat(product).plat].name }}最低到手</small></div></div></article></div></section>
-    <section id="cart-showcase" class="vertex-content-section vertex-cart"><div class="vertex-section-heading"><span class="vertex-kicker">SHOPPING CART</span><h2>购物车里的候选</h2><p>先收集，再比较。每件商品都保留数量、平台和券后价。</p></div><div class="vertex-cart-list"><article v-for="item in cartShowcase" :key="item.id" class="vertex-cart-item"><img :src="item.product.image" :alt="item.product.name" /><div><strong>{{ item.product.name }}</strong><span>{{ item.sku.name }} · {{ PLATFORMS[item.platform].name }}</span></div><b>¥{{ item.sku.prices[item.platform].b * item.quantity }}</b><small>×{{ item.quantity }}</small></article></div></section>
+    <section id="product-library" class="vertex-content-section vertex-library">
+      <div class="vertex-section-heading"><span class="vertex-kicker">DEMO PRODUCTS</span><h2>示例商品</h2><p>登录后这里会换成你自己的物品库——已购入商品的参数、价格和备注档案。</p></div>
+      <div class="vertex-library-grid">
+        <article v-for="item in demoProducts" :key="item.id" class="vertex-library-card">
+          <div class="vertex-library-card__image"><img :src="item.image" :alt="item.name" /></div>
+          <div class="vertex-library-card__body">
+            <span>{{ item.category }}</span>
+            <h3>{{ item.name }}</h3>
+            <p>{{ item.note }}</p>
+            <div class="vertex-library-card__price"><strong>¥{{ item.price }}</strong><small>示例参考价</small></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="cart-showcase" class="vertex-content-section vertex-cart">
+      <div class="vertex-section-heading"><span class="vertex-kicker">SHOPPING CART</span><h2>购物车里的候选</h2><p>登录后这里会展示你收藏的待购商品——规格、备注和参考价集中管理。</p></div>
+      <div class="vertex-cart-list">
+        <article class="vertex-cart-item">
+          <img :src="demoProducts[0].image" :alt="demoProducts[0].name" />
+          <div><strong>{{ demoProducts[0].name }}</strong><span>{{ demoProducts[0].category }}</span></div>
+          <b>¥{{ demoProducts[0].price }}</b>
+        </article>
+        <article class="vertex-cart-item">
+          <img :src="demoProducts[1].image" :alt="demoProducts[1].name" />
+          <div><strong>{{ demoProducts[1].name }}</strong><span>{{ demoProducts[1].category }}</span></div>
+          <b>¥{{ demoProducts[1].price }}</b>
+        </article>
+      </div>
+    </section>
+
     <section id="chat-placeholder" class="vertex-content-section vertex-placeholder"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div><a href="#auth-form-section" class="vertex-btn vertex-btn--small"><span>登录后开始</span></a></section>
     <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div><span class="vertex-placeholder__badge">即将填入</span></section>
   </main>
@@ -312,7 +310,6 @@ async function submit() {
   box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
 }
 
-/* 图形验证码：输入框 + 可点击刷新的图片 */
 .auth-captcha-row {
   display: flex;
   align-items: center;
@@ -575,7 +572,6 @@ async function submit() {
     justify-self: stretch;
     max-width: none;
   }
-
 }
 
 @media (max-width: 639px) {
@@ -706,5 +702,19 @@ async function submit() {
   .auth-product-item__image img {
     transition: none;
   }
+}
+
+/* 覆盖全局 .vertex-library-card 布局：图片区裁剪 + 图片等比缩放，避免竖长图溢出盖住文字 */
+.vertex-library-card__image {
+  overflow: hidden;
+}
+
+.vertex-library-card__image img {
+  max-width: 82%;
+  max-height: 82%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  opacity: 1;
 }
 </style>

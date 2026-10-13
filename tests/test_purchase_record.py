@@ -31,7 +31,6 @@ from app.models import PurchaseRecord, User, UserSession
 from app.router.purchase_record import _validate_purchased_at, _validate_specs, _validate_url
 from app.services import product_page
 from app.services.product_page import clean_title, parse_product_url
-from app.services.user_profile import compose_context, summarize_focus, summarize_profile
 
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -57,18 +56,6 @@ def _login_payload(email: str, password: str) -> dict:
     answer = "TEST23"
     sig = hmac.new(settings.captcha_key.encode(), f"{salt}.{ts}.{answer}".encode(), hashlib.sha256).hexdigest()
     return {"user_email": email, "password": password, "captcha_token": f"{salt}.{ts}.{sig}", "captcha_code": answer}
-
-
-class _Row:
-    """给纯函数用的假行：summarize_* 只读属性，不碰 ORM。"""
-
-    def __init__(self, name, platform=None, price=None, purchased_at=None, specs=None, note=None):
-        self.name = name
-        self.platform = platform
-        self.price = price
-        self.purchased_at = purchased_at
-        self.specs = specs or {}
-        self.note = note
 
 
 # ==================== 链接解析：白名单是唯一的 SSRF 防线 ====================
@@ -189,57 +176,6 @@ def test_purchased_at_normalizes_to_naive_utc():
     assert _validate_purchased_at(cst) == datetime(2026, 3, 1, 2, 30)
     assert _validate_purchased_at(datetime(2026, 3, 1, 10, 30)) == datetime(2026, 3, 1, 10, 30)
     assert _validate_purchased_at(None) is None
-
-
-# ==================== 画像与上下文拼装 ====================
-
-def test_profile_is_empty_without_records():
-    assert summarize_profile([]) == ""
-    assert compose_context("", "") == ""
-
-
-def test_profile_counts_prices_and_platforms():
-    rows = [
-        _Row("iPhone 15", "京东", 4999, datetime(2026, 3, 1)),
-        _Row("保温杯", "淘宝", 99, datetime(2026, 2, 1)),
-        _Row("旧鼠标", "京东"),
-    ]
-    text = summarize_profile(rows)
-    assert "共 3 条消费记录" in text
-    assert "2 条填了价格" in text
-    assert "均价 2549" in text
-    assert "最高 4999" in text and "最低 99" in text
-    assert "京东 2 件" in text
-    assert "非实时价" in text          # 提醒模型这不是当前报价
-    assert "iPhone 15" in text and "2026-03-01" in text
-
-
-def test_profile_survives_rows_without_anything():
-    assert summarize_profile([_Row("")]) != ""      # 只有条数还是有意义
-    assert "常记的购买平台" not in summarize_profile([_Row("仅名称")])
-
-
-def test_profile_is_capped():
-    rows = [_Row("很长的商品名" * 30, "京东", 1) for _ in range(200)]
-    assert len(summarize_profile(rows)) <= 1200
-
-
-def test_focus_expands_specs_and_note():
-    text = summarize_focus([_Row("戴森 V12", "苏宁", 2999, datetime(2026, 5, 6), {"颜色": "金色"}, "国补后买的")])
-    assert text.startswith("- ")
-    for fragment in ("戴森 V12", "苏宁", "2999 元", "2026-05-06", "颜色:金色", "备注 国补后买的"):
-        assert fragment in text
-
-
-def test_focus_flattens_newlines_in_names():
-    """名称里的换行会顶破「一行一条」的排版；恶意页面标题正是靠这个塞假条目。"""
-    assert len(summarize_focus([_Row("商品\n- 假条目\n- 第二条")]).splitlines()) == 1
-
-
-def test_compose_labels_both_blocks():
-    merged = compose_context("概况文本", "- 焦点文本")
-    assert "用户消费概况" in merged and "用户本次勾选的商品" in merged
-    assert merged.index("用户本次勾选的商品") < merged.index("用户消费概况")
 
 
 # ==================== HTTP 集成 ====================

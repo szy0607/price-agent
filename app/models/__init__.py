@@ -4,6 +4,7 @@ from .cartitem import CartItem
 from .owned_item import OwnedItem
 from .purchase_record import PurchaseRecord
 from .chat_message import ChatMessage
+from .conversation import Conversation
 from .user_profile import UserProfile
 from .user_api_key import UserApiKey
 from .image import Image
@@ -14,6 +15,7 @@ __all__ = [
     "OwnedItem",
     "PurchaseRecord",
     "ChatMessage",
+    "Conversation",
     "UserProfile",
     "UserApiKey",
     "Image",

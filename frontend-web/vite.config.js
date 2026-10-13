@@ -33,6 +33,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 用户上传的商品图：/uploads/{name}.jpg 必须代理到后端，否则 dev server 自己 404，
+      // 前端 <img @error> 会兜底成占位图。后端路由里有登录+归属鉴权，cookie 随代理带过去。
+      '/uploads': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
     },
   },
 })
