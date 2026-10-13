@@ -60,8 +60,8 @@ def compose_prompt(messages: list[ChatTurnSchema], rows: list[PurchaseRecord]) -
         lines = "\n".join(_format_line(row) for row in rows)
         context = f"【用户已购商品（本次咨询指定）】\n{lines}\n\n"
 
-    # 模型调用接口是单 prompt 形状（app/services/model_call.call_model），
-    # 多轮历史只能摊平进正文，不为了这个去动那边的函数签名
+    # call_model 已支持 messages 列表；这里仍把多轮历史摊平进单个 user prompt
+    # （改真多轮是后续优化，本次合并 gitee/main 只做签名适配）
     turns = messages[:-1]
     history = ""
     if turns:
@@ -75,7 +75,8 @@ async def answer(user_id: int, messages: list[ChatTurnSchema], record_ids: list[
                  session: AsyncSession) -> dict:
     rows = await load_focus_records(user_id, record_ids, session)
     try:
-        content, model = await model_call.call_model(user_id, compose_prompt(messages, rows), session)
+        content, model = await model_call.call_model(
+            user_id, [{"role": "user", "content": compose_prompt(messages, rows)}], session)
     except model_call.ModelCallError as exc:
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
     return {"content": content, "model": model}
