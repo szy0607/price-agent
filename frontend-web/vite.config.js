@@ -33,9 +33,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-      // 用户上传的商品图：/uploads/{name}.jpg 必须代理到后端，否则 dev server 自己 404，
-      // 前端 <img @error> 会兜底成占位图。后端路由里有登录+归属鉴权，cookie 随代理带过去。
-      '/uploads': {
+      // 图片两条链路都要代理到后端，前缀写 '/upload' 才能同时盖住：
+      //   写 POST /upload/image、读 GET /uploads/{name}.jpg
+      // 只写 '/uploads' 的话，上传请求匹配不上前缀，会被 dev server 自己 404 掉
+      // （同一 URL 直连 8000 是 400，即后端路由本来好的）。
+      // 后端路由里有登录+归属鉴权，cookie 随代理带过去。
+      '/upload': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
