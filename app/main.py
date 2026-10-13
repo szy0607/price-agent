@@ -3,6 +3,7 @@ from app.core.errors import register_exception_handlers
 from app.core.http_client import start_http_client, close_http_client
 from app.core.logging import setup_logging
 from app.core.middleware import TraceMiddleware
+from app.router.chat import chat_router
 from app.router.cartitem_router import cart_router
 from app.router.conversation import conversation_router
 from app.router.health import health_router
@@ -61,6 +62,7 @@ app.include_router(owned_router)
 app.include_router(settings_router)
 app.include_router(upload_router)
 app.include_router(conversation_router)
+app.include_router(chat_router)
 # /uploads/{name} 路由必须在任何 mount 之前注册——同前缀下具体路由优先匹配，
 # 访问收口（登录 + 归属校验）全在这个路由里，uploads/ 不再有裸奔的静态出口
 app.include_router(image_file_router)
