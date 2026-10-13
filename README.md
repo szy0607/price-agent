@@ -1,25 +1,29 @@
-# 智能电商采购 Agent（智能导购 Agent）
+# 智能导购 Agent（购物决策助手）
 
-个人定制购物助手：通过对话理解用户需求（预算、平台偏好、学生身份、性价比 / 品质取向），聚合淘宝 / 京东 / 拼多多三平台价格与优惠，输出比价、领券口令与购买建议。**AI 是顾问，不是代购——下单与支付 100% 由用户自己完成。**
+个人定制购物助手：通过对话理解用户需求（预算、平台偏好、学生身份、性价比 / 品质取向），维护个人购物车与物品库参数档案，AI 联网补全商品参数，并记录个人消费流水。**AI 是顾问，不是代购——下单与支付 100% 由用户自己完成。**
+
+> 版本口径：设计方案 v0.8（2026-10-02 消费记录拍板）。价格情报线已按 v0.8 决策删除：不做联盟 API 比价、不承诺实时最低价；价格只来自用户自记与 AI 补全的网络参考价（带提示、可修改）。
 
 ## 在线访问
 
 网页版已部署于 GitHub Pages：https://szy0607.github.io/price-agent/
 
-> 在线版为纯前端演示：账号注册 / 登录 / 图形验证码需搭配本地后端（`127.0.0.1:8000`）联调；业务页进入需先登录（登录态暂存于 localStorage）。
+> 在线版为纯前端演示：账号注册 / 登录 / 图形验证码、购物车 / 物品库 / 消费记录等业务功能均需搭配本地后端（`127.0.0.1:8000`）联调；业务页进入需先登录（登录态存于 Cookie，在线演示页暂存 localStorage）。
 
 ## 功能特性
 
-| 模块 | 说明 |
-|------|------|
-| 智能咨询 `/chat` | 粘贴商品链接 / 上传商品图片 / 直接提问，输出 Agent 协作过程 → 情报卡 → 对比摘要 → 推荐结论 → 复制口令；支持「无目标商品」场景：只提需求（如"3000 元以内降噪耳机"）即可获得跨平台 Top N 推荐 |
-| 款式对比 `/compare` | 双价矩阵（公开价 A / 领券价 B）+ 规格表 + 券明细 + 对比结论，支持淘宝 / 京东 / 拼多多三平台 tab 切换 |
-| 领券指引 `/coupon` | 券类型、分平台领券步骤、权益矩阵、复制口令跳转 App |
-| 用户画像 | 从对话中解析预算 / 平台偏好 / 学生身份 / 价格敏感度 / 会员身份（PLUS、88VIP），本地持久化并生成个性化推荐附注 |
-| 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证），bcrypt 密码哈希，用户数据与登录记录落库 MySQL；`user_sessions` 会话表 + Cookie 会话下发与校验已落地 |
-| 设置 | 账号与第三方 API Key 管理；服务端会话鉴权、Key 加密存储和脱敏展示 |
-
-> v0.6 规划功能「心愿单与购买决策 `/wishlist` / 个人物品库 `/items` / 消费记录与预算 `/spending`」已在前端注册占位路由（ComingSoonView，需登录），内容待开发。
+| 模块 | 说明 | 状态 |
+|------|------|------|
+| 智能咨询 `/chat` | 多会话对话页面：输入购物问题直接提问，可勾选消费记录 / 商品参数作为上下文（同时附上消费概况）；模型使用「设置」中的默认 API Key（OpenAI 兼容 `/chat/completions` 接口） | 🔵 联调中（会话 / 消息表与模型调用服务已就绪，聊天端点收尾中） |
+| 购物车 `/cart` | 已确认参数档案清单：增删改查、AI 联网补全草稿（`ai-draft`，不入库、确认后落库）、标记已购转入物品库 | ✅ 已落地 |
+| 物品库 `/items` | 已购物品参数档案：增删改查；支持直接建档（不经过购物车，双入口） | ✅ 已落地 |
+| 消费记录 `/spending` | 用户自记消费流水：商品名 / 链接 / 平台 / 价格 / 规格；贴链接可抓取页面生成草稿（待用户确认后落库）；消费记录可勾选注入对话上下文 | ✅ 已落地 |
+| 用户画像 | `user_profile` 表已建（一行一用户，`preferences` 自由键值）；画像写入（A6 画像 Agent）规划中，前端当前为 localStorage 演示画像 | 🔵 部分 |
+| 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证）、bcrypt 密码哈希、Cookie 会话（`user_sessions`，token 哈希落库）、登出、`/auth/me` | ✅ 已落地 |
+| 设置 `/settings` | 用户自定义模型供应商（`provider` / `base_url` / `model_name`）、默认 Key 管理；API Key 以 AES-256-GCM 加密存储、脱敏展示 | ✅ 已落地 |
+| 图片上传 | 商品展示图上传（2MB 上限 + 限流）、访问统一收口鉴权（登录 + 归属校验）、生命周期自动清理（后台定时任务，幂等） | ✅ 已落地 |
+| 款式对比 `/compare`、领券指引 `/coupon` | 双价矩阵 / 券类型与领券步骤演示页 | 🟡 Mock 数据 |
+| 心愿单 `/wishlist` | 占位路由（ComingSoonView，需登录） | ⬜ 规划 |
 
 ## 项目结构
 
@@ -28,21 +32,29 @@ price-agent/
 ├── frontend-web/               # 网页版前端（Vue 3 + Vite + Tailwind 4，GitHub Pages 部署目标）
 ├── frontend/                   # 移动版 Demo（Vue 3 + Vant 4，参考工程）
 ├── app/                        # 后端（FastAPI + 异步 SQLAlchemy）
-│   ├── core/                   # 配置（.env）、安全（bcrypt）、图形验证码、日志、错误处理、中间件、trace
+│   ├── core/                   # 配置（.env）、安全（bcrypt）、图形验证码、Cookie 会话、限流、日志、错误处理、中间件、trace、Key 加密、HTTP 客户端
 │   ├── database/               # 异步数据库会话与模型基类
-│   ├── models/                 # ORM 模型（User、UserSession）
-│   ├── repository/             # 数据访问层（auth_repo）
-│   ├── router/                 # 路由定义（/auth 注册登录验证码、/health 健康检查）
-│   ├── schemas/                # Pydantic 请求模型（注册 / 登录）
-│   ├── dependence.py           # 依赖注入（数据库会话）
-│   └── main.py                 # FastAPI 应用入口（日志、统一异常、trace 中间件）
-├── alembic/                    # 数据库迁移（versions/：users、user_sessions 两表）
-├── docs/                       # 接口契约与设计文档（登录契约、trace_id 基座等）
+│   ├── models/                 # ORM 模型（users、user_sessions、cart_item、owned_item、purchase_record、conversation、chat_message、user_profile、user_api_key、image）
+│   ├── repository/             # 数据访问层（auth / cart / owned / conversation）
+│   ├── router/                 # 路由（/auth、/health、/setting、/cart、/items、/purchase-records、/conversations、/upload、/uploads）
+│   ├── schemas/                # Pydantic 请求 / 响应模型
+│   ├── services/               # 业务服务（模型调用、AI 联网补全、联网搜索、图片存储、商品页抓取、API Key 管理）
+│   ├── dependence.py           # 依赖注入（数据库会话、当前用户、同源写保护）
+│   └── main.py                 # 应用入口（日志、统一异常、trace 中间件、lifespan 图片清理任务）
+├── alembic/                    # 数据库迁移（versions/，16 个迁移文件）
+├── docs/                       # 接口契约与设计文档
+├── scripts/                    # 一次性脚本（seed_user13_data.py：开发测试数据，幂等）
+├── tests/                      # 后端测试（pytest + pytest-asyncio）
+├── postman/                    # Postman 环境 / 全局变量
+├── static/                     # Swagger / ReDoc 静态资源
+├── uploads/                    # 用户上传图片（运行时生成，不入 Git）
 ├── .github/workflows/deploy.yml # GitHub Pages 自动部署
-├── 智能电商采购Agent-设计方案.md  # 设计方案（v0.6）
-├── 开发流程.md                   # 开发流程与合规红线（v1.0）
-├── requirements.txt             # 后端运行依赖
-└── requirements-dev.txt         # 后端开发 / 测试依赖
+├── 智能电商采购Agent-设计方案.md  # 设计方案底稿（v0.8）
+├── 开发流程.md                   # 开发流程与合规红线
+├── AGENTS.md                   # 数据库协作守则（AI 协作者必读）
+├── requirements.txt            # 后端运行依赖
+├── requirements-dev.txt        # 后端开发 / 测试依赖
+└── .env.example                # 环境变量模板（复制为 .env）
 ```
 
 ## 技术栈
@@ -51,64 +63,123 @@ price-agent/
 |------|--------|
 | 网页版前端 | Vue 3.5 + Vite 5 + Tailwind 4 + Phosphor Icons + Vue Router 4 |
 | 移动版 Demo | Vue 3 + Vite 5 + Vant 4 |
-| 后端 | Python 3.10 + FastAPI + 异步 SQLAlchemy 2.0 + Pydantic v2 |
-| 数据库 | MySQL 8（业务事实源）+ PostgreSQL 16/pgvector（M3 知识库）+ Redis（M3/M6 起的缓存与临时状态） |
-| 迁移 | Alembic（异步） |
+| 后端 | Python 3.10（conda `fast`）+ FastAPI + 异步 SQLAlchemy 2.0 + Pydantic v2 + bcrypt + Pillow（验证码） |
+| 数据库 | MySQL 8（唯一事实源，库名 `price_agent`，UTC 时区口径）；PostgreSQL 16/pgvector、Redis 为 M3 规划 |
+| 迁移 | Alembic（异步，时间默认值只用 `UTC_TIMESTAMP()`） |
+| 密钥加密 | AES-256-GCM（`API_KEY_KEK` 主密钥） |
+| AI 能力 | 用户自配 OpenAI 兼容供应商（`base_url` + `model_name`，取唯一默认 Key）；博查 Bocha Web Search API（联网补全） |
+| 测试 | pytest + pytest-asyncio（后端）；`node --test`（前端） |
 | 部署 | GitHub Actions → GitHub Pages |
 
 ## 本地开发
-
-### 网页版前端（frontend-web）
-
-```bash
-cd frontend-web
-npm install
-npm run dev      # 开发服务器 http://localhost:5174/price-agent/
-npm run build    # 构建产物 dist/
-```
-
-> 开发服务器已配置代理：`/auth` 前缀请求转发到本地后端 `http://127.0.0.1:8000`，便于前后端联调。
 
 ### 后端服务（app）
 
 后端运行环境为 conda 环境 `fast`（Python 3.10），在项目根目录执行：
 
-```bash
+```cmd
 conda activate fast
+cd /d F:\price-agent
 pip install -r requirements-dev.txt   # 开发（含测试依赖）
-alembic upgrade head                   # 执行数据库迁移
-uvicorn app.main:app --reload          # 启动 http://127.0.0.1:8000
+alembic upgrade head                   # 执行数据库迁移（见 AGENTS.md 开工三步）
+python -m uvicorn app.main:app --port 8000 --reload --no-access-log   # http://127.0.0.1:8000
 ```
+
+> `--no-access-log`：关闭 uvicorn 原生的状态码行（无时间戳 / trace_id），避免与 `app.access` 访问日志重复。备选 `fastapi run --port 8000`（功能正常，但控制台不显示 `app.access` 日志）。
+
+### 网页版前端（frontend-web）
+
+```cmd
+cd /d F:\price-agent\frontend-web
+npm install
+npm run dev      # 开发服务器 http://localhost:5174/price-agent/
+npm run build    # 构建产物 dist/
+npm test         # node --test tests/*.test.mjs
+```
+
+> 开发服务器已配置代理，7 个前缀全部转发到本地后端 `http://127.0.0.1:8000`：`/auth` `/setting` `/chat` `/purchase-records` `/cart` `/items` `/uploads`。后端必须起在 **8000** 端口，前端才通。
 
 ### 移动版 Demo（frontend，可选）
 
-```bash
-cd frontend
+```cmd
+cd /d F:\price-agent\frontend
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # 产物 dist/
 ```
 
+### 后端测试
+
+```cmd
+pytest
+```
+
+> 无 pytest 配置文件（strict 模式），异步测试需显式挂 `@pytest.mark.asyncio`（见 `tests/test_purchase_record.py`）。前端测试见上。
+
+### 数据库迁移
+
+改了 `app/models/` 之后：`alembic revision --autogenerate -m "英文短描述"` → 逐行读生成的迁移文件（autogenerate 盲区清单见 `AGENTS.md` §4）→ `alembic upgrade head`。完成判据：`alembic current` 与 `alembic heads` 打印同一个 revision id。**多人协作只同步表结构、不同步数据**，详见 `AGENTS.md`。
+
 ## 环境变量（.env）
 
-后端通过根目录 `.env` 读取配置（见 `app/core/config.py`，全部为**必填**，缺失时应用 import 即报错）：
+后端通过根目录 `.env` 读取配置（见 `app/core/config.py`）。`DB_URL`、密码长度口径、`CAPTCHA_KEY` 为**必填**（缺失时应用 import 即报错）；其余为可选：
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `DB_URL` | 异步 MySQL 连接串 | `mysql+aiomysql://user:password@127.0.0.1:3306/price_agent?charset=utf8mb4` |
-| `PW_MIN_LENGTH` | 密码最小长度 | `6` |
-| `PW_MAX_LENGTH` | 密码最大长度 | `18` |
-| `CAPTCHA_KEY` | 图形验证码签名密钥（HMAC-SHA256，仅后端使用，不进日志 / Git） | 随机串（`secrets.token_urlsafe(32)` 生成） |
+| `DB_URL` | 异步 MySQL 连接串（**必填**） | `mysql+aiomysql://user:password@127.0.0.1:3306/price_agent?charset=utf8mb4` |
+| `PW_MIN_LENGTH` / `PW_MAX_LENGTH` | 密码最小 / 最大长度（**必填**，两人口径需一致） | `6` / `18` |
+| `CAPTCHA_KEY` | 图形验证码签名密钥，HMAC-SHA256（**必填**，`secrets.token_urlsafe(32)` 生成，不进日志 / Git） | 随机串 |
+| `BOCHA_API_KEY` | 博查 Web Search API Key（可选，AI 联网补全用；`open.bochaai.com` 申请，按次计费） | 博查 key |
+| `API_KEY_KEK` | 用户 API Key 加密主密钥（可选，AES-256-GCM；32 字节 base64 串，丢失后已存 key 无法解密） | base64 串 |
 
-> `.env` 已加入 `.gitignore`，请勿提交真实凭据。
+> `.env` 已加入 `.gitignore`，请勿提交真实凭据；模板见 `.env.example`。
 
 ## 后端 API
 
-| 接口 | 方法 | 请求体 | 说明 |
-|------|------|--------|------|
-| `/auth/captcha` | GET | — | 下发图形验证码 `{captcha_token, image_base64}`。自研无状态签名方案（HMAC-SHA256 + 随机 salt，120s 有效，答案不出后端、不写库、不依赖 Redis）；前端点击可刷新 |
-| `/auth/register` | POST | `{user_email, username, password}` | 注册。密码须同时包含字母与数字，长度在 `PW_MIN_LENGTH` ~ `PW_MAX_LENGTH` 之间；bcrypt 哈希存储 |
-| `/auth/login` | POST | `{user_email, password, captcha_token, captcha_code}` | 登录。验证码在**任何数据库操作之前**校验（契约 §2.2「顺序即安全边界」）；通过后校验密码并更新最近登录时间 |
+### 账号与健康
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/auth/captcha` | GET | 下发图形验证码 `{captcha_token, image_base64}`。自研无状态签名方案（HMAC-SHA256 + 随机 salt，120s 有效，答案不出后端、不写库、不依赖 Redis） |
+| `/auth/register` | POST | 注册 `{user_email, username, password}`。密码须同时含字母与数字，长度在 `PW_MIN_LENGTH` ~ `PW_MAX_LENGTH`；bcrypt 哈希存储 |
+| `/auth/login` | POST | 登录。验证码在**任何数据库操作之前**校验（契约 §2.2「顺序即安全边界」）；通过后校验密码、下发 Cookie 会话（`user_sessions` 存 token 哈希） |
+| `/auth/me` | GET | 当前登录用户信息 |
+| `/auth/logout` | POST | 登出（撤销会话、清 Cookie） |
+| `/health` | GET | 健康检查（含 MySQL 探活，5s 超时） |
+
+### 设置（用户模型供应商）
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/setting/api-keys` | GET / POST | 列出（脱敏，仅 `key_suffix`）/ 新增（AES-256-GCM 加密落库；新增即默认） |
+| `/setting/api-keys/{id}` | PUT / DELETE | 更新 / 删除（删除默认 Key 不转移默认） |
+| `/setting/api-keys/{id}/default` | PUT | 设为默认 Key |
+
+### 购物车 / 物品库 / 消费记录
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/cart/items` | GET / POST | 购物车列表 / 新增（已确认参数档案） |
+| `/cart/items/{id}/update` | PATCH | 更新条目 |
+| `/cart/items/{id}/delete` | DELETE | 删除条目 |
+| `/cart/items/{id}/transform` | POST | 标记已购，转入物品库（可附带购买信息） |
+| `/cart/items/ai-draft` | POST | AI 联网补全草稿 `{name, category}`：只产草稿不入库，规格键名带 `(AI)` 后缀，价格仅回填搜索资料中明确出现的公开标价，确认后走 `POST /cart/items` |
+| `/items` | GET / POST | 物品库列表 / 直接建档 |
+| `/items/latest` | GET | 最近新增物品 |
+| `/items/{id}` | PATCH / DELETE | 更新 / 删除 |
+| `/purchase-records` | GET / POST | 消费记录列表（上限 200 条）/ 新增（价格 = 用户自记，不承诺实时价） |
+| `/purchase-records/{id}` | PUT / DELETE | 更新 / 删除 |
+| `/purchase-records/link-preview` | POST | 按商品链接抓取页面，生成待确认草稿（不入库；域名白名单防 SSRF，绝不回填价格） |
+
+### 对话与图片
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/conversations/{id}/title` | PATCH | 修改会话标题（归属校验：必须同时匹配 id 与 user_id） |
+| `/upload/image` | POST | 上传商品展示图（分块读 + 2MB 硬上限，每用户 60s 10 次限流；落盘即登记 `image` 表） |
+| `/uploads/{name}` | GET | 图片访问唯一出口（登录 + 归属鉴权；未登记 / 非本人 / 文件不存在统一返回「图片不存在」） |
+
+> Swagger / ReDoc 文档：`/docs`、`/redoc`（静态资源自托管于 `static/`）。
 
 ## 部署
 
@@ -122,35 +193,38 @@ npm run build    # 产物 dist/
 
 | 文档 | 说明 |
 |------|------|
-| `智能电商采购Agent-设计方案.md` | 设计方案底稿（v0.6）：多 Agent 架构、统一适配层、双价策略、合规红线 |
-| `开发流程.md` | 开发流程规范（v1.0）：里程碑、数据契约、git 规范、合规自查清单 |
+| `智能电商采购Agent-设计方案.md` | 设计方案底稿（v0.8）：方向拍板 10 条（§0）、Agent 结构（A2/A3 合并为 A2′、A6 画像 Agent）、决策 #29~#33、合规红线 |
+| `开发流程.md` | 开发流程规范：里程碑、数据契约、git 规范、合规自查清单 |
 | `docs/用户注册与登录-接口契约.md` | 注册登录接口契约（含验证码 §2.5、错误码） |
 | `docs/登录人机验证与登录态-设计.md` | 人机验证与登录态设计 |
+| `docs/第三方API-Key加密存储.md` | 用户 API Key 加密、模型选择、咨询调用与轮换操作 |
+| `docs/AI联网补全-接口契约.md` | AI 联网补全契约（博查通道、`ai-draft` 草稿形态、来源标记、价格回填口径） |
+| `docs/图片上传服务-接口契约.md` | 图片上传契约（两阶段加固、归属模型、访问收口、生命周期清理） |
+| `docs/启动命令.md` | 日常开发命令速查（后端 / 前端 / 迁移 / 测试 / 常见问题） |
 | `docs/M0-基座-trace_id中间件与健康检查-设计.md` | M0 基座（trace_id、健康检查）设计 |
 | `docs/代码审查-异步连接与Session规范.md` | 异步连接与 Session 规范审查 |
 | `docs/注册登录-实现指引.md` | 注册登录实现指引（施工手册：按什么顺序动手、每步为什么） |
-| `docs/第三方API-Key加密存储.md` | 用户 API Key 加密、模型选择、咨询调用与轮换操作 |
-| `docs/参考-Yuxi存储层搭配与可借鉴清单.md` | 参考项目 `F:\Yuxi` 存储层调研（可用 9 / 有条件 4 / 不可搬 7） |
 | `docs/架构契约审查-待商定.md` | 组件启用时机与数据归属（Redis 分阶段、双库边界、缓存语义） |
+| `docs/参考-Yuxi存储层搭配与可借鉴清单.md` | 参考项目 `F:\Yuxi` 存储层调研 |
 
-## 当前进度与路线图
+## 当前进度
 
-| 里程碑 | 目标 | 状态 |
-|--------|------|------|
-| M0 开发基座 | 后端骨架、配置 / trace_id / CI | 🔵 进行中（骨架 / 配置 / trace_id 中间件 / `/health` / 统一错误处理 / 日志 / 注册登录 / 图形验证码已落地；Cookie 会话进行中——`user_sessions` 表已建，下发与校验待实现） |
-| M1 后端核心链路 | FastAPI + LangGraph 五 Agent + Mock | ⬜ 未开始 |
-| M2 契约与画像 | JSON Schema 契约 + A0 画像 Agent | ⬜ 未开始 |
-| M3 数据与 RAG | PostgreSQL 16 + pgvector（知识/向量）+ Redis（联盟 API 缓存、对话最近消息热缓存） | ⬜ 未开始（业务库与迁移已就绪） |
-| M4 前端联调 | frontend-web 接后端 | 🔵 进行中（登录 / 注册 / 验证码 + Cookie 会话 + API Key 设置与真实模型咨询已接后端；业务页 /compare /coupon 等仍为 Mock） |
-| M5 真实联盟 API | 多多进宝 → 淘宝 → 京东 | ⬜ 未开始（当前 Mock） |
-| M6 安全合规加固 | 沙箱、限流、隐私 | ⬜ 未开始 |
-| M7 上线 | 部署、监控、验收 | ⬜ 未开始 |
+| 里程碑 / 模块 | 状态 |
+|--------|------|
+| M0 开发基座 | ✅ 骨架、配置、trace_id、`/health`、统一错误处理、日志、注册登录、图形验证码、Cookie 会话鉴权、限流均已落地 |
+| M4 前端联调 | 🔵 进行中（账号、API Key 设置、购物车、物品库、消费记录、图片上传、AI 补全已接后端；`/chat` 联调收尾；`/compare`、`/coupon` 仍为 Mock） |
+| 消费记录与画像 | 🔵 消费记录已落地（`purchase_record` + 链接抓取草稿 + 对话上下文）；`user_profile` 表已建，A6 画像 Agent 规划中 |
+| M1 多 Agent（LangGraph） | ⬜ 未开始（当前为确定性管线：模型直调 + 联网补全；LangGraph 依赖未引入） |
+| M3 数据与 RAG | ⬜ 未开始（PostgreSQL 16 + pgvector、Redis 规划中） |
+| M5 真实联盟 API | ⬜ 已按 v0.8 拍板删除价格情报线（不做联盟 API 比价；价格 = 用户自记 + AI 网络参考价） |
+| M6 安全合规加固 / M7 上线 | ⬜ 未开始 |
 
 ## 合规说明
 
 - **零交易动作**：不代下单、不代支付，交易 100% 由用户完成
-- **不提供 CPS 推广链接**：只做查券信息聚合与领券指引，与推广解耦
-- **双价透明**：渠道专享券同时展示「能领 / 领不到」两个价格，不误导
+- **不提供 CPS 推广链接**：只做商品参数聚合与领券指引，与推广解耦
+- **价格透明**：消费记录价格由用户自记自确认；AI 联网补全回填的是搜索资料中明确出现的公开标价，前端固定提示「网络参考价，可能过时，以商品页实际价格为准」且用户可改
+- **补全来源标记**：AI 联网补全的规格键带 `(AI)` 后缀与「来源：网络」徽标，结果必须用户确认后生效
+- **链接抓取白名单**：服务端按链接抓页面只出草稿、绝不回填价格，域名白名单防 SSRF
 - **千人千面权益不承诺**：天降红包、限时折扣等账号维度权益只做指引，注明「以页面实时价为准」
-- **官方数据源**：信息一律走官方联盟查券 API 查询，不使用评论区数据
 - 价格与券信息以平台页面实时展示为准

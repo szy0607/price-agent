@@ -64,7 +64,7 @@ async def complete_specs(name:str,category: str |None,user_id:int ,session:Async
         return {"name": name, "category": category, "price": None,
                 "specs": {}, "model": None, "sources": []}
     try:
-        content,model = await model_call.call_model(user_id,_build_prompt(name,results),session)
+        content,model = await model_call.call_model(user_id, [{"role": "user", "content": _build_prompt(name,results)}], session=session)
     except model_call.ModelCallError as exc:
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
     try:

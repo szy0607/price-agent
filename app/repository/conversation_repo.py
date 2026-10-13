@@ -25,3 +25,12 @@ async def update_title(
     await session.commit()
     row = await session.get(Conversation, conversation_id)
     return row
+async def create_conversation(user_id:int,title:str,session:AsyncSession) -> Conversation:
+    conversation = Conversation(
+        user_id=user_id,
+        title=title,
+    )
+    session.add(conversation)
+    await session.commit()
+    await session.refresh(conversation)
+    return conversation

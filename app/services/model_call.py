@@ -49,9 +49,11 @@ def validate_public_url(base_url: str)->None:
             raise ValueError(f"目标地址不是公网地址")
 async  def call_model(
         user_id: int,
-        prompt: str,
+        messages: list[dict],
         session:AsyncSession, *,
         max_token: int | None = 6000)->tuple[str, str]:
+    if not messages:
+        raise ModelCallError("messages 不能为空")
     record = await api_key_service.key_for_call(user_id, session)
     try:
         await asyncio.to_thread(validate_public_url, record.base_url)
@@ -60,7 +62,7 @@ async  def call_model(
     url = record.base_url.rstrip("/") + "/chat/completions"
     payload = {
         "model": record.model_name,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_token,
     }
     headers = {
