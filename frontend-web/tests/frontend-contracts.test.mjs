@@ -62,6 +62,31 @@ test('product library parser normalizes JSON and CSV prices', async () => {
   assert.equal(csvProduct.skus[0].prices.pdd.b, 79)
 })
 
+test('消费记录卡片组：点「其他」筛得出并入其中的那几笔', async () => {
+  const { filterByGroup, groupByPlatform } = await import('../src/utils/platformGroups.js')
+  const records = [
+    { name: '键盘', platform: '京东', price: 300 },
+    { name: '鼠标', platform: '京东', price: 100 },
+    { name: '显示器', platform: '淘宝', price: 900 },
+    { name: '台灯', platform: '闲鱼', price: 50 },
+    { name: '杯子', platform: '得物' },
+    { name: '耳机', platform: ' 拼多多 ', price: 20 },
+  ]
+
+  const { groups, members } = groupByPlatform(records, 4)
+
+  assert.deepEqual(groups.map((group) => group.key), ['京东', '淘宝', '闲鱼', '其他'])
+  assert.deepEqual(groups[3].merged, ['得物', '拼多多'])
+  assert.equal(groups[3].count, 2)
+  // 这一行就是原先的 bug：卡片 key 是「其他」，记录里却没有一条 platform 叫这个名字
+  assert.deepEqual(filterByGroup(records, members, '其他').map((item) => item.name), ['杯子', '耳机'])
+  assert.deepEqual(filterByGroup(records, members, '京东').map((item) => item.name), ['键盘', '鼠标'])
+  assert.deepEqual(filterByGroup(records, members, null), records)
+  assert.deepEqual(filterByGroup(records, members, '闲鱼'), records.slice(3, 4))
+  // 组消失后（不再需要合并）旧 key 只能筛出空集，交给视图去取消筛选
+  assert.deepEqual(filterByGroup(records, members, '得物'), [])
+})
+
 test('settings uses the key list endpoint without the removed model setting flow', async () => {
   const source = await read('src/views/SettingsView.vue')
   const loadKeys = source.match(/async function loadKeys\(\)[\s\S]*?\n\}/)

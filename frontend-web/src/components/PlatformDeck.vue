@@ -5,12 +5,10 @@ import { computed, ref } from 'vue'
 // 点某张卡 = 按该平台筛选下面的记录列表。
 // 分类维度取自 purchase_record.platform（该表没有 category 列，见 AGENTS.md §0）。
 const props = defineProps({
-  groups: { type: Array, default: () => [] }, // [{ key, count, total }]
+  groups: { type: Array, default: () => [] }, // [{ key, count, total, merged? }]
   active: { type: String, default: null },
 })
 const emit = defineEmits(['select'])
-
-const MAX_CARDS = 6
 
 const PALETTE = [
   { bg: 'linear-gradient(150deg,#4ef08a,#2ee06a)', glyph: 'monster' }, // 亮绿
@@ -46,35 +44,24 @@ const STACK = [
   { sx: -24, sy: 14, s: 0.66, rot: -6 },
 ]
 
-// 平台多于 6 个时，按笔数取前 5，其余并成一张「其他平台」，避免卡片糊成一团
-const placed = computed(() => {
-  const sorted = [...props.groups].sort((a, b) => b.count - a.count)
-  let list = sorted
-  if (sorted.length > MAX_CARDS) {
-    const head = sorted.slice(0, MAX_CARDS - 1)
-    const tail = sorted.slice(MAX_CARDS - 1)
-    list = [
-      ...head,
-      {
-        key: '其他',
-        count: tail.reduce((sum, g) => sum + g.count, 0),
-        total: tail.reduce((sum, g) => sum + g.total, 0),
-        merged: tail.map((g) => g.key),
-      },
-    ]
-  }
-  return list.map((group, index) => ({
-    ...group,
-    slot: SLOT[index % SLOT.length],
-    stack: STACK[index % STACK.length],
-    palette: PALETTE[index % PALETTE.length],
-    // 收拢态的叠压顺序必须按笔数倒序：排第一（花钱最多）的那张要压在最上面，
-    // 否则它被后面的卡挡住，鼠标根本点不到。depth 单调递减负责 3D 绘制顺序，
-    // rank 负责同一深度下的兜底层级。slot.z 只管散开后的景深。
-    rank: list.length - index,
-    depth: 40 - index * 12,
-  }))
-})
+// 父级已按笔数合并到不超过 6 张，这里只负责排位与配色。
+// 「其他」这类合并卡在 groups 里带 merged（实际涵盖的平台名），仅用于 title 提示，
+// 筛选由父级按 merged 判定——组件不要自己发明 key，否则父级按 key 筛会筛出空集。
+const placed = computed(() =>
+  [...props.groups]
+    .sort((a, b) => b.count - a.count)
+    .map((group, index) => ({
+      ...group,
+      slot: SLOT[index % SLOT.length],
+      stack: STACK[index % STACK.length],
+      palette: PALETTE[index % PALETTE.length],
+      // 收拢态的叠压顺序必须按笔数倒序：排第一（花钱最多）的那张要压在最上面，
+      // 否则它被后面的卡挡住，鼠标根本点不到。depth 单调递减负责 3D 绘制顺序，
+      // rank 负责同一深度下的兜底层级。slot.z 只管散开后的景深。
+      rank: props.groups.length - index,
+      depth: 40 - index * 12,
+    })),
+)
 
 // 悬停卡片的层级要顶到最高，而 CSS 无法把 z-index 动态排到最上，只能记在状态里
 const hovered = ref(null)

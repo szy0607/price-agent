@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { PhArrowRight, PhCheck, PhMagnifyingGlass, PhPlus, PhShoppingCart, PhTrash, PhX } from '@phosphor-icons/vue'
 import PlatformDeck from '../components/PlatformDeck.vue'
+import { filterByGroup, groupByPlatform } from '../utils/platformGroups.js'
 import {
   createPurchaseRecord,
   deletePurchaseRecord,
@@ -26,25 +27,13 @@ const emptyForm = { ...form }
 const priced = computed(() => records.value.filter((item) => item.price !== null && item.price !== undefined))
 const totalSpent = computed(() => priced.value.reduce((sum, item) => sum + item.price, 0))
 
-// 卡片组的分组维度。purchase_record 表没有 category 列（分表决策 #29/#30），
-// 所以这里用真实存在的 platform 分组，不擅自加字段。
-function platformOf(item) {
-  return (item.platform || '').trim() || '平台未记'
-}
+// 卡片组的分组维度见 utils/platformGroups.js：purchase_record 没有 category 列，
+// 用真实存在的 platform 分组，不擅自加字段。
 const activePlatform = ref(null)
-const platformGroups = computed(() => {
-  const map = new Map()
-  for (const item of records.value) {
-    const key = platformOf(item)
-    const group = map.get(key) || { key, count: 0, total: 0 }
-    group.count += 1
-    group.total += item.price || 0
-    map.set(key, group)
-  }
-  return [...map.values()]
-})
+const platformDeck = computed(() => groupByPlatform(records.value))
+const platformGroups = computed(() => platformDeck.value.groups)
 const visibleRecords = computed(() =>
-  activePlatform.value ? records.value.filter((item) => platformOf(item) === activePlatform.value) : records.value,
+  filterByGroup(records.value, platformDeck.value.members, activePlatform.value),
 )
 
 function notify(message) {
@@ -106,9 +95,7 @@ async function refresh() {
     records.value = await listPurchaseRecords()
     selectedIds.value = selectedIds.value.filter((id) => records.value.some((item) => item.id === id))
     // 删掉最后一条后，被选中的平台可能已经不存在了，别把筛选卡在空集上
-    if (activePlatform.value && !records.value.some((item) => platformOf(item) === activePlatform.value)) {
-      activePlatform.value = null
-    }
+    if (activePlatform.value && !visibleRecords.value.length) activePlatform.value = null
   } catch (error) {
     notify(error.message || '消费记录读取失败')
   } finally {
