@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { PhArchive, PhChatsCircle, PhCpu, PhGearSix, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhChatsCircle, PhCpu, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import { listCartItems, listConversations, listConversationMessages, listOwnedItems, resolveImageUrl, sendChatMessage } from '../utils/api'
 
@@ -197,7 +197,6 @@ onMounted(async () => {
             <PhPackage :size="15" />引用商品<span v-if="selectedList.length" class="text-accent">{{ selectedList.length }}</span>
           </button>
           <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800" title="新咨询" aria-label="新咨询" :disabled="sending" @click="startNewChat"><PhPlus :size="19" /></button>
-          <RouterLink to="/settings" class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" title="模型设置" aria-label="模型设置"><PhGearSix :size="19" /></RouterLink>
         </div>
       </header>
 

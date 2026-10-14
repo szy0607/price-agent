@@ -219,18 +219,26 @@ async def refresh_profile(user_id: int, conversation_id: int) -> None:
             prefs_json = json.dumps(dict(current.preferences) if current else {}, ensure_ascii=False)
             evidence = build_profile_context(dict(current.preferences) if current else {},
                                              purchases, owned)
-            history_text = "".join(
-                f"{'用户' if m.role == 'user' else '助手'}：{m.content[:_MESSAGE_CAP]}\n"
-                for m in history)
+            # 近期对话从最新往旧装，超预算就停。切忌整体左截断（composed[:cap]）：
+            # 那会留下最旧的几轮、把「本轮新信号」扔掉——而「这轮有没有新偏好」
+            # 正是 A6 的核心职责（2026-10-14 验收实测，左截断下最新提问整段消失）
+            lines, budget = [], _MESSAGE_CAP
+            for m in reversed(history):
+                piece = f"{'用户' if m.role == 'user' else '助手'}：{m.content[:_MESSAGE_CAP]}\n"
+                if budget - len(piece) < 0:
+                    break
+                lines.append(piece)
+                budget -= len(piece)
+            history_text = "".join(reversed(lines))
         # session ②：调模型（call_model 内部要用 session 查 user_api_key，别空手调）
         async with async_session_local() as session:
             verdict, _ = await model_call.call_model(user_id, [
                 {"role": "system", "content": PROFILE_SYSTEM_PROMPT},
                 {"role": "user", "content": (
-                    f"【当前画像】\n{prefs_json}\n\n"
+                    f"【当前画像】\n{prefs_json[:_EVIDENCE_CAP]}\n\n"
                     f"【行为证据】\n{evidence[:_EVIDENCE_CAP]}\n\n"
                     f"【近期对话】\n{history_text}"
-                )[:_MESSAGE_CAP]},
+                )},
             ], session)
         updated, preferences = _parse_verdict(verdict)
         if not updated:

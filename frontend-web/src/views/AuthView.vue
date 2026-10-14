@@ -1,7 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhCheckCircle, PhEye, PhEyeSlash, PhLightning } from '@phosphor-icons/vue'
+import { PhArrowLeft, PhChatCircleDots, PhCheckCircle, PhCpu, PhEye, PhEyeSlash, PhLightning, PhMagnifyingGlass, PhShoppingBag, PhShoppingCart, PhUserCircle } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import { getCaptcha, getCurrentUser, loginUser, registerUser } from '../utils/api'
 import { setAuthUser } from '../utils/auth'
@@ -20,20 +20,38 @@ const captchaLoading = ref(false)
 
 const isRegister = () => mode.value === 'register'
 
-// 首页展示用的静态演示商品（不依赖登录态；图片在 public/images/ 下，未登录可访问）。
+// 首页展示用的静态能力示意（不依赖登录态；图片在 public/images/ 下，未登录可访问）。
 // 登录后这些位置会换成用户自己的物品库/购物车数据。
 const demoProducts = [
-  { id: 1, category: '数码', name: 'Apple iPhone 15 Pro 256G 原色钛金属', price: 8999, image: `${import.meta.env.BASE_URL}images/demo-iphone.jpg`, note: 'A17 Pro · 4800 万像素' },
-  { id: 2, category: '数码影音', name: 'Sony WH-1000XM5 无线降噪耳机', price: 2399, image: `${import.meta.env.BASE_URL}images/demo-headphone.jpg`, note: '8 麦克风降噪 · LDAC' },
-  { id: 3, category: '潮流玩具', name: '乐高 保时捷 911 GT3 RS 积木', price: 1999, image: `${import.meta.env.BASE_URL}images/demo-lego.jpg`, note: '1:8 复刻 · 2704 块' },
-  { id: 4, category: '家居水具', name: '星巴克 经典女神随行杯 473ml', price: 129, image: `${import.meta.env.BASE_URL}images/demo-cup.jpg`, note: '不锈钢保温 · 473ml' },
+  { id: 1, tag: 'AI 咨询', name: '智能对话导购', note: '描述预算和场景，Agent 帮你理清取舍', image: `${import.meta.env.BASE_URL}images/cap-chat.png` },
+  { id: 2, tag: '待购清单', name: '收藏的候选商品', note: '规格、备注、参考价集中管理', image: `${import.meta.env.BASE_URL}images/cap-scale.png` },
+  { id: 3, tag: '已购归档', name: '买完移入物品库', note: '参数、价格、备注全部档案化', image: `${import.meta.env.BASE_URL}images/cap-library.png` },
+  { id: 4, tag: '消费洞察', name: '支出与预算', note: '月度支出、品类分布一目了然', image: `${import.meta.env.BASE_URL}images/cap-spend.png` },
 ]
 const showcase = demoProducts[0]
+
+// 多智能体长链路（节点用代码渲染，避免位图背景与页面色差）
+const flowIcons = {
+  chat: PhChatCircleDots,
+  cart: PhShoppingCart,
+  user: PhUserCircle,
+  cpu: PhCpu,
+  search: PhMagnifyingGlass,
+  bag: PhShoppingBag,
+}
+const flowNodes = [
+  { icon: 'chat', label: '提问' },
+  { icon: 'cart', label: '商品记忆' },
+  { icon: 'user', label: '用户画像' },
+  { icon: 'cpu', label: '模型推理' },
+  { icon: 'search', label: '联网检索' },
+  { icon: 'bag', label: '购买建议' },
+]
 
 const activeSection = ref('auth-form-section')
 const sectionLinks = [
   { id: 'auth-form-section', label: '登录' },
-  { id: 'product-library', label: '示例商品' },
+  { id: 'product-library', label: '核心能力' },
   { id: 'cart-showcase', label: '购物车' },
   { id: 'chat-placeholder', label: '智能咨询' },
   { id: 'spending-placeholder', label: '消费记录' },
@@ -146,8 +164,7 @@ async function submit() {
         <a href="#auth-form-section" class="vertex-btn vertex-btn--hero"><span>登录，开始咨询</span></a>
         <div class="vertex-product-preview">
           <img :src="showcase.image" :alt="showcase.name" />
-          <div><span>示例商品</span><strong>{{ showcase.name }}</strong><small>{{ showcase.note }}</small></div>
-          <div class="vertex-product-prices"><b>参考价 <em>¥{{ showcase.price }}</em></b></div>
+          <div><span>{{ showcase.tag }}</span><strong>{{ showcase.name }}</strong><small>{{ showcase.note }}</small></div>
         </div>
         <div class="vertex-insight-grid">
           <article><small>支持平台</small><strong>3 个</strong><span>淘宝 · 京东 · 拼多多</span></article>
@@ -174,15 +191,14 @@ async function submit() {
     </section>
 
     <section id="product-library" class="vertex-content-section vertex-library">
-      <div class="vertex-section-heading"><span class="vertex-kicker">DEMO PRODUCTS</span><h2>示例商品</h2><p>登录后这里会换成你自己的物品库——已购入商品的参数、价格和备注档案。</p></div>
+      <div class="vertex-section-heading"><span class="vertex-kicker">CAPABILITIES</span><h2>四个核心能力</h2><p>从智能咨询、物品库到购物车，把商品参数、平台价格和优惠条件放在一个地方看懂。</p></div>
       <div class="vertex-library-grid">
         <article v-for="item in demoProducts" :key="item.id" class="vertex-library-card">
           <div class="vertex-library-card__image"><img :src="item.image" :alt="item.name" /></div>
           <div class="vertex-library-card__body">
-            <span>{{ item.category }}</span>
+            <span>{{ item.tag }}</span>
             <h3>{{ item.name }}</h3>
             <p>{{ item.note }}</p>
-            <div class="vertex-library-card__price"><strong>¥{{ item.price }}</strong><small>示例参考价</small></div>
           </div>
         </article>
       </div>
@@ -192,20 +208,18 @@ async function submit() {
       <div class="vertex-section-heading"><span class="vertex-kicker">SHOPPING CART</span><h2>购物车里的候选</h2><p>登录后这里会展示你收藏的待购商品——规格、备注和参考价集中管理。</p></div>
       <div class="vertex-cart-list">
         <article class="vertex-cart-item">
-          <img :src="demoProducts[0].image" :alt="demoProducts[0].name" />
-          <div><strong>{{ demoProducts[0].name }}</strong><span>{{ demoProducts[0].category }}</span></div>
-          <b>¥{{ demoProducts[0].price }}</b>
+          <img :src="demoProducts[1].image" :alt="demoProducts[1].name" />
+          <div><strong>{{ demoProducts[1].name }}</strong><span>{{ demoProducts[1].tag }}</span></div>
         </article>
         <article class="vertex-cart-item">
-          <img :src="demoProducts[1].image" :alt="demoProducts[1].name" />
-          <div><strong>{{ demoProducts[1].name }}</strong><span>{{ demoProducts[1].category }}</span></div>
-          <b>¥{{ demoProducts[1].price }}</b>
+          <img :src="demoProducts[2].image" :alt="demoProducts[2].name" />
+          <div><strong>{{ demoProducts[2].name }}</strong><span>{{ demoProducts[2].tag }}</span></div>
         </article>
       </div>
     </section>
 
-    <section id="chat-placeholder" class="vertex-content-section vertex-placeholder"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div><a href="#auth-form-section" class="vertex-btn vertex-btn--small"><span>登录后开始</span></a></section>
-    <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div><span class="vertex-placeholder__badge">即将填入</span></section>
+    <section id="chat-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div><a href="#auth-form-section" class="vertex-btn vertex-btn--small"><span>登录后开始</span></a></div><div class="agent-flow"><template v-for="(node, i) in flowNodes" :key="node.icon"><div class="agent-flow__node"><span class="agent-flow__icon"><component :is="flowIcons[node.icon]" :size="26" /></span><span class="agent-flow__label">{{ node.label }}</span></div><div v-if="i < flowNodes.length - 1" class="agent-flow__arrow" aria-hidden="true">→</div></template></div></section>
+    <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div><span class="vertex-placeholder__badge">即将填入</span></div><div class="spend-mock"><div class="spend-mock__total"><small>本月支出</small><b>¥3,280</b><span>较上月 <em>-8%</em></span></div><div class="spend-mock__bars" aria-hidden="true"><i style="--h:42%"></i><i style="--h:60%"></i><i style="--h:35%"></i><i style="--h:72%"></i><i style="--h:55%"></i><i style="--h:88%"></i><i style="--h:64%"></i></div><div class="spend-mock__donut" aria-hidden="true"></div></div></section>
   </main>
 </template>
 
@@ -704,17 +718,144 @@ async function submit() {
   }
 }
 
-/* 覆盖全局 .vertex-library-card 布局：图片区裁剪 + 图片等比缩放，避免竖长图溢出盖住文字 */
-.vertex-library-card__image {
-  overflow: hidden;
-}
-
+/* 覆盖全局 .vertex-library-card 图片区：让方形概念图在固定高度区内等比完整显示 */
 .vertex-library-card__image img {
-  max-width: 82%;
-  max-height: 82%;
-  width: auto;
-  height: auto;
   object-fit: contain;
   opacity: 1;
+}
+
+/* 智能咨询区块：文字按钮一行，下方通栏放多智能体链路插图 */
+.vertex-placeholder--chat {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.vertex-placeholder__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.agent-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 40px;
+  padding: 26px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgb(38 65 106 / 0.08);
+}
+
+.agent-flow__node {
+  display: flex;
+  flex: 1 1 110px;
+  min-width: 104px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 10px;
+  border: 1px solid #e6edf7;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff, #fff);
+}
+
+.agent-flow__icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgb(37 99 235 / 0.1);
+  color: #2563eb;
+}
+
+.agent-flow__label {
+  color: #475569;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.agent-flow__arrow {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: #94a3b8;
+  font-size: 18px;
+}
+
+/* 消费记录示意：本月支出 + 月度柱图 + 品类环形占比 */
+.spend-mock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) 96px;
+  gap: 28px;
+  align-items: center;
+  margin-top: 36px;
+  padding: 26px 28px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgb(38 65 106 / 0.08);
+}
+
+.spend-mock__total small {
+  color: #78869a;
+  font-size: 12px;
+}
+
+.spend-mock__total b {
+  display: block;
+  margin-top: 6px;
+  color: #172033;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.spend-mock__total span {
+  display: block;
+  margin-top: 6px;
+  color: #78869a;
+  font-size: 12px;
+}
+
+.spend-mock__total em {
+  color: #16a34a;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.spend-mock__bars {
+  display: flex;
+  height: 120px;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.spend-mock__bars i {
+  flex: 1;
+  height: var(--h);
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  opacity: 0.85;
+}
+
+.spend-mock__donut {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: conic-gradient(#2563eb 0 45%, #93c5fd 45% 72%, #e2e8f0 72% 100%);
+  -webkit-mask: radial-gradient(circle, transparent 52%, #000 53%);
+  mask: radial-gradient(circle, transparent 52%, #000 53%);
+}
+
+@media (max-width: 860px) {
+  .spend-mock {
+    grid-template-columns: 1fr;
+  }
+
+  .spend-mock__donut {
+    justify-self: start;
+  }
 }
 </style>

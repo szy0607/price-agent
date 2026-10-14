@@ -18,7 +18,8 @@ def _fallback_title(text:str)->str:
     trimmed = folded.strip("。！？!?.,，；;：:、~～… ")
     return trimmed[:_TITLE_MAX] or "新咨询"
 
-# chat_service.py 内：history 之后按总字符截断，防 12×4000 字把模型上下文撑爆
+# 历史按总字符截断，防 12 条 × 4000 字把模型上下文撑爆（中文约 5~9 万 token，
+# 会超部分模型上下文）；与 profile_service 的 A6 输入预算同构：都从最新往旧留
 def _cap_history(messages: list, cap: int = 8000) -> list:
     total, kept = 0, []
     for m in reversed(messages):          # 从最近的开始留
@@ -27,10 +28,6 @@ def _cap_history(messages: list, cap: int = 8000) -> list:
             break
         kept.append(m)
     return kept[::-1]
-
-# 调用点：
-
-
 
 
 def _format_item(src: str, item_id: int, name: str, specs: dict) -> str:
@@ -65,10 +62,11 @@ async def send_message(user_id: int, payload: ChatSendInSchema,session: AsyncSes
     try:
         reply, model = await model_call.call_model(user_id, messages, session)
     except model_call.ModelCallError as exc:
-# str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url
+        # str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url
+        # 泄漏（10-13 P0 口径，别一刀切覆盖成笼统文案）。
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
 
-# ⑦ assistant 落库 + 推进会话 update_time（否则列表排序停摆，见 touch 注释）
+    # assistant 落库 + 推进会话 update_time（否则列表排序停摆，见 touch 注释）
     await chat_repo.add_message(user_id, conversation_id, "assistant", reply,
                                 session, model=model)
     await conversation_repo.touch_conversation( user_id, conversation_id,session)

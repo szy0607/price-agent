@@ -107,8 +107,8 @@ async function handleSignOut() {
 
     <main id="main" class="flex-1">
       <RouterView v-slot="{ Component }">
-        <Transition name="page" mode="out-in">
-          <component :is="Component" :key="route.fullPath" />
+        <Transition name="page">
+          <component :is="Component" />
         </Transition>
       </RouterView>
     </main>
