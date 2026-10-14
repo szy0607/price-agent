@@ -93,12 +93,25 @@ export function setDefaultApiKey(id) {
   })
 }
 
-export function sendChatMessage(messages, recordIds = []) {
-  // record_ids 只当索引用，商品名和价格由后端按登录用户反查展开，前端改不动。
+// 新版对话契约：conversation_id 懒创建（首条消息传 null，后端返回真实 id），
+// item_refs 是右侧面板勾选的商品引用（src: cart/owned + id）。
+export function sendChatMessage({ conversationId = null, text, itemRefs = [] }) {
   return apiRequest('/chat/message', {
     method: 'POST',
-    body: JSON.stringify({ messages, record_ids: recordIds }),
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      text,
+      item_refs: itemRefs.map((ref) => ({ src: ref.src, id: ref.id })),
+    }),
   })
+}
+
+export function listConversations(limit = 50) {
+  return apiRequest(`/conversations?limit=${limit}`)
+}
+
+export function listConversationMessages(conversationId, limit = 200) {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`)
 }
 
 export function listPurchaseRecords() {
@@ -181,6 +194,44 @@ export function completeCartItemDraft({ name, category }) {
   return apiRequest('/cart/items/ai-draft', {
     method: 'POST',
     body: JSON.stringify({ name, category: category || null }),
+  })
+}
+
+// 购物分组：列表/详情都带价格统计（未购买=购物车参考价，已购买=档案价，无价格不计入合计）。
+// item_type 固定 'cart'（购物车·未购买）/ 'owned'（物品库·已购买）。
+export function listGroups() {
+  return apiRequest('/groups')
+}
+
+export function createGroup(group) {
+  return apiRequest('/groups', { method: 'POST', body: JSON.stringify(group) })
+}
+
+export function updateGroup(id, group) {
+  return apiRequest(`/groups/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(group),
+  })
+}
+
+export function deleteGroup(id) {
+  return apiRequest(`/groups/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function getGroupDetail(id) {
+  return apiRequest(`/groups/${encodeURIComponent(id)}`)
+}
+
+export function addGroupItem(groupId, item) {
+  return apiRequest(`/groups/${encodeURIComponent(groupId)}/items`, {
+    method: 'POST',
+    body: JSON.stringify(item),
+  })
+}
+
+export function removeGroupItem(groupId, itemType, itemId) {
+  return apiRequest(`/groups/${encodeURIComponent(groupId)}/items/${itemType}/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
   })
 }
 

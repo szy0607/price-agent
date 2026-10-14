@@ -33,6 +33,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      '/groups': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       // 图片两条链路都要代理到后端，前缀写 '/upload' 才能同时盖住：
       //   写 POST /upload/image、读 GET /uploads/{name}.jpg
       // 只写 '/uploads' 的话，上传请求匹配不上前缀，会被 dev server 自己 404 掉

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { PhChartPie, PhChatCircleDots, PhGearSix, PhLightning, PhPackage, PhSignOut, PhShoppingCart } from '@phosphor-icons/vue'
+import { PhChartPie, PhChatCircleDots, PhFolder, PhGearSix, PhLightning, PhPackage, PhSignOut, PhShoppingCart } from '@phosphor-icons/vue'
 import BrandIcon from './components/BrandIcon.vue'
 import { isAuthenticated, refreshAuth, signOut as logoutCurrentUser } from './utils/auth'
 
@@ -24,6 +24,7 @@ const links = [
   { to: '/chat', label: '智能咨询', icon: PhChatCircleDots },
   { to: '/cart', label: '购物车', icon: PhShoppingCart },
   { to: '/items', label: '物品库', icon: PhPackage },
+  { to: '/groups', label: '购物分组', icon: PhFolder },
   { to: '/spending', label: '消费记录', icon: PhChartPie },
   { to: '/settings', label: '设置', icon: PhGearSix },
 ]

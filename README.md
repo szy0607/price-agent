@@ -17,6 +17,7 @@
 | 智能咨询 `/chat` | 多会话对话页面：输入购物问题直接提问，可勾选消费记录 / 商品参数作为上下文（同时附上消费概况）；模型使用「设置」中的默认 API Key（OpenAI 兼容 `/chat/completions` 接口） | 🔵 联调中（会话 / 消息表与模型调用服务已就绪，聊天端点收尾中） |
 | 购物车 `/cart` | 已确认参数档案清单：增删改查、AI 联网补全草稿（`ai-draft`，不入库、确认后落库）、标记已购转入物品库 | ✅ 已落地 |
 | 物品库 `/items` | 已购物品参数档案：增删改查；支持直接建档（不经过购物车，双入口） | ✅ 已落地 |
+| 购物分组 `/groups` | 把购物车（未购买）和物品库（已购买）的物品归成一组：组内分已购买 / 未购买两区展示，统计各区与总计价格（无价格物品提示「未填价」不计入合计）；一个物品可进多个分组；删分组不动物品 | ✅ 已落地 |
 | 消费记录 `/spending` | 用户自记消费流水：商品名 / 链接 / 平台 / 价格 / 规格；贴链接可抓取页面生成草稿（待用户确认后落库）；消费记录可勾选注入对话上下文 | ✅ 已落地 |
 | 用户画像 | `user_profile` 表已建（一行一用户，`preferences` 自由键值）；画像写入（A6 画像 Agent）规划中，前端当前为 localStorage 演示画像 | 🔵 部分 |
 | 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证）、bcrypt 密码哈希、Cookie 会话（`user_sessions`，token 哈希落库）、登出、`/auth/me` | ✅ 已落地 |
@@ -34,14 +35,14 @@ price-agent/
 ├── app/                        # 后端（FastAPI + 异步 SQLAlchemy）
 │   ├── core/                   # 配置（.env）、安全（bcrypt）、图形验证码、Cookie 会话、限流、日志、错误处理、中间件、trace、Key 加密、HTTP 客户端
 │   ├── database/               # 异步数据库会话与模型基类
-│   ├── models/                 # ORM 模型（users、user_sessions、cart_item、owned_item、purchase_record、conversation、chat_message、user_profile、user_api_key、image）
-│   ├── repository/             # 数据访问层（auth / cart / owned / conversation）
-│   ├── router/                 # 路由（/auth、/health、/setting、/cart、/items、/purchase-records、/conversations、/upload、/uploads）
+│   ├── models/                 # ORM 模型（users、user_sessions、cart_item、owned_item、item_group、item_group_ref、purchase_record、conversation、chat_message、user_profile、user_api_key、image）
+│   ├── repository/             # 数据访问层（auth / cart / owned / group / conversation）
+│   ├── router/                 # 路由（/auth、/health、/setting、/cart、/items、/groups、/purchase-records、/conversations、/upload、/uploads）
 │   ├── schemas/                # Pydantic 请求 / 响应模型
 │   ├── services/               # 业务服务（模型调用、AI 联网补全、联网搜索、图片存储、商品页抓取、API Key 管理）
 │   ├── dependence.py           # 依赖注入（数据库会话、当前用户、同源写保护）
 │   └── main.py                 # 应用入口（日志、统一异常、trace 中间件、lifespan 图片清理任务）
-├── alembic/                    # 数据库迁移（versions/，16 个迁移文件）
+├── alembic/                    # 数据库迁移（versions/，17 个迁移文件）
 ├── docs/                       # 接口契约与设计文档
 ├── scripts/                    # 一次性脚本（seed_user13_data.py：开发测试数据，幂等）
 ├── tests/                      # 后端测试（pytest + pytest-asyncio）
@@ -97,7 +98,7 @@ npm run build    # 构建产物 dist/
 npm test         # node --test tests/*.test.mjs
 ```
 
-> 开发服务器已配置代理，7 个前缀全部转发到本地后端 `http://127.0.0.1:8000`：`/auth` `/setting` `/chat` `/purchase-records` `/cart` `/items` `/uploads`。后端必须起在 **8000** 端口，前端才通。
+> 开发服务器已配置代理，8 个前缀全部转发到本地后端 `http://127.0.0.1:8000`：`/auth` `/setting` `/chat` `/purchase-records` `/cart` `/items` `/groups` `/uploads`。后端必须起在 **8000** 端口，前端才通。
 
 ### 移动版 Demo（frontend，可选）
 
@@ -167,6 +168,10 @@ pytest
 | `/items` | GET / POST | 物品库列表 / 直接建档 |
 | `/items/latest` | GET | 最近新增物品 |
 | `/items/{id}` | PATCH / DELETE | 更新 / 删除 |
+| `/groups` | GET / POST | 分组列表（带每组价格统计）/ 新建分组 |
+| `/groups/{id}` | GET / PATCH / DELETE | 分组详情（已购买 / 未购买两区 + 统计）/ 重命名 / 删除（只删分组与成员关系，不动物品） |
+| `/groups/{id}/items` | POST | 把物品加入分组：`{item_type: "cart"｜"owned", item_id}` |
+| `/groups/{id}/items/{item_type}/{item_id}` | DELETE | 移出分组 |
 | `/purchase-records` | GET / POST | 消费记录列表（上限 200 条）/ 新增（价格 = 用户自记，不承诺实时价） |
 | `/purchase-records/{id}` | PUT / DELETE | 更新 / 删除 |
 | `/purchase-records/link-preview` | POST | 按商品链接抓取页面，生成待确认草稿（不入库；域名白名单防 SSRF，绝不回填价格） |

@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError, ErrorCode
 from app.models import OwnedItem
+from app.repository.group_repo import delete_refs_by_item
 from app.schemas.owned_sche import OwnedItemInSchema, OwnedItemUpdateSchema
 from app.services import image_service
 
@@ -35,6 +36,8 @@ async def delete_owned_item(item_id: int, user_id: int, session: AsyncSession) -
         raise BizError(ErrorCode.PARAM_INVALID, "记录不存在")
     released_path = item.image
     await session.delete(item)
+    # 分组跟随：物品没了，它在各分组里的成员关系一起走（同一事务）
+    await delete_refs_by_item("owned", item_id, session)
     await session.commit()
     await image_service.release_if_unreferenced(released_path, session)
 

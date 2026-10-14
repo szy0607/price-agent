@@ -6,6 +6,7 @@ from app.core.middleware import TraceMiddleware
 from app.router.chat import chat_router
 from app.router.cartitem_router import cart_router
 from app.router.conversation import conversation_router
+from app.router.group import group_router
 from app.router.health import health_router
 from app.router.log_in import auth_router
 from app.router.purchase_record import purchase_router
@@ -59,6 +60,7 @@ app.include_router(purchase_router)
 app.include_router(health_router)
 app.include_router(cart_router)
 app.include_router(owned_router)
+app.include_router(group_router)
 app.include_router(settings_router)
 app.include_router(upload_router)
 app.include_router(conversation_router)

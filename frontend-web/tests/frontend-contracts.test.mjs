@@ -132,3 +132,35 @@ test('every route view keeps a single element root so the page transition can an
     assert.equal(roots[0].type, 1, `${name} 的根节点不是元素`)
   }
 })
+
+test('shopping group api helpers hit the /groups endpoints', async () => {
+  const api = await read('src/utils/api.js')
+  assert.match(api, /apiRequest\('\/groups'\)/)
+  assert.match(api, /apiRequest\('\/groups', \{[\s\S]*method: 'POST'/)
+  assert.match(api, /apiRequest\(`\/groups\/\$\{encodeURIComponent\(id\)\}`, \{[\s\S]*method: 'PATCH'/)
+  assert.match(api, /apiRequest\(`\/groups\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/)
+  assert.match(api, /apiRequest\(`\/groups\/\$\{encodeURIComponent\(id\)\}`, \{[\s\S]*method: 'DELETE'/)
+  assert.match(api, /apiRequest\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}\/items`, \{[\s\S]*method: 'POST'/)
+  assert.match(api, /apiRequest\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}\/items\/\$\{itemType\}\/\$\{encodeURIComponent\(itemId\)\}`, \{[\s\S]*method: 'DELETE'/)
+})
+
+test('group view shows both zones and the unpriced hint', async () => {
+  const view = await read('src/views/GroupView.vue')
+  assert.match(view, /getGroupDetail\(/)
+  assert.match(view, /removeGroupItem\(/)
+  assert.match(view, /未购买合计（购物车）/)
+  assert.match(view, /已购买合计（物品库）/)
+  assert.match(view, /未填价/)
+  assert.match(view, /未计入合计/)
+})
+
+test('cart and library pages add items into a group through the shared picker', async () => {
+  for (const name of ['src/views/CartView.vue', 'src/views/ItemsView.vue']) {
+    const view = await read(name)
+    assert.match(view, /GroupPickerModal/)
+    assert.match(view, /openGroupPicker\(/)
+  }
+  const picker = await read('src/components/GroupPickerModal.vue')
+  assert.match(picker, /addGroupItem\(/)
+  assert.match(picker, /createGroup\(/)
+})
