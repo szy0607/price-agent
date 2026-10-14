@@ -2,6 +2,8 @@ from .user import User
 from .user_session import UserSession
 from .cartitem import CartItem
 from .owned_item import OwnedItem
+from .item_group import ItemGroup
+from .item_group_ref import ItemGroupRef
 from .purchase_record import PurchaseRecord
 from .chat_message import ChatMessage
 from .conversation import Conversation
@@ -13,6 +15,8 @@ __all__ = [
     "UserSession",
     "CartItem",
     "OwnedItem",
+    "ItemGroup",
+    "ItemGroupRef",
     "PurchaseRecord",
     "ChatMessage",
     "Conversation",
