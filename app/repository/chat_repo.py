@@ -33,6 +33,20 @@ def trim_trailing_users(messages:list[ChatMessage]) -> list[ChatMessage]:
     while end > 0 and messages[end-1].role == "user":
         end -= 1
     return messages[:end]
+async def list_messages(user_id:int,conversation_id:int,limit:int,session:AsyncSession) -> list[ChatMessage]:
+    """某个会话的全部历史，按 id 升序（前端直接顺序渲染）。
+
+    与 recent_messages 的分工：那个给模型拼上下文用，倒序取最近 N 条再翻回来；
+    这个给用户看历史用，正序取最多 limit 条。user_id 同时在 WHERE 里，
+    归属不通过的会话根本查不到行。
+    """
+    result = await session.scalars(
+        select(ChatMessage)
+        .where(ChatMessage.user_id == user_id,ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.id.asc())
+        .limit(limit)
+    )
+    return list(result.all())
 async def fetch_items_for_refs(
         user_id: int, refs: list[ItemRefInSchema],
         session: AsyncSession) -> list[tuple[str, int, str, dict]]:

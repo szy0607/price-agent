@@ -1,82 +1,76 @@
-"""智能咨询：把勾选的已购记录展开成上下文，拼成单个 prompt 交给用户的默认模型。
-
-刻意不落库：前端 ChatView 的会话是本地状态，请求里没有 conversation_id，
-落库到 chat_message / conversation 要等他那边把会话 id 的口径定下来才接
-（见 app/models/chat_message.py 的用途说明）。本模块只负责「这一次问答」。
-"""
-import logging
-
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError, ErrorCode
-from app.models import PurchaseRecord
-from app.schemas.chat_sche import ChatTurnSchema
-from app.services import model_call
+from app.repository import conversation_repo, chat_repo
+from app.schemas.chat_sche import ChatSendInSchema, ChatSendOutSchema
+from app.services import model_call, profile_service
+from fastapi import BackgroundTasks
+SYSTEM_PROMPT = (
+    "你是智能导购助手。用简洁中文回答用户的购物问题，说明关键取舍。"
+    "你没有实时商品、库存、价格或优惠券数据；不得声称已经查询、验证或采集这些信息，"
+    "不得编造具体到手价、券、口令或购买链接。涉及价格时提醒用户以商品页面为准。"
+)
+_TITLE_MAX = 100
+_HISTORY_LIMIT = 12
 
-logger = logging.getLogger(__name__)
+def _fallback_title(text:str)->str:
+    folded = " ".join(text.split())
+    trimmed = folded.strip("。！？!?.,，；;：:、~～… ")
+    return trimmed[:_TITLE_MAX] or "新咨询"
 
-_TEMPLATE = """{context}{history}请针对【本轮提问】作答，要求：
-1. 只依据以上提供的信息和常识，不要编造具体价格、优惠、库存；
-2. 提到已购商品时使用以上给出的名称与价格；
-3. 300 字以内，先给结论再给理由，不要复述问题。
+# chat_service.py 内：history 之后按总字符截断，防 12×4000 字把模型上下文撑爆
+def _cap_history(messages: list, cap: int = 8000) -> list:
+    total, kept = 0, []
+    for m in reversed(messages):          # 从最近的开始留
+        total += len(m.content)
+        if total > cap:
+            break
+        kept.append(m)
+    return kept[::-1]
 
-【本轮提问】
-{question}
-"""
-
-
-async def load_focus_records(user_id: int, record_ids: list[int],
-                             session: AsyncSession) -> list[PurchaseRecord]:
-    """按登录用户反查勾选的消费记录，保持用户勾选顺序。
-
-    缺任意一条整条请求报错：静默少带一件商品，模型会在残缺上下文上照常作答，
-    用户根本看不出少了什么——这个口径沿用被删掉的旧 chat 路由。
-    """
-    if not record_ids:
-        return []
-    rows = list((await session.scalars(
-        select(PurchaseRecord)
-        .where(PurchaseRecord.user_id == user_id, PurchaseRecord.id.in_(record_ids))
-    )).all())
-    if len(rows) != len(record_ids):
-        missing = sorted(set(record_ids) - {row.id for row in rows})
-        logger.info("咨询上下文缺记录: user_id=%s missing=%s", user_id, missing)
-        raise BizError(ErrorCode.PARAM_INVALID, "勾选的消费记录不存在或不属于你")
-    by_id = {row.id: row for row in rows}
-    return [by_id[item] for item in record_ids]
+# 调用点：
 
 
-def _format_line(row: PurchaseRecord) -> str:
-    platform = (row.platform or "").strip() or "平台未记"
-    price = "价格未记" if row.price is None else f"{row.price:g}元"
-    day = "日期未记" if row.purchased_at is None else row.purchased_at.date().isoformat()
-    return f"- {row.name}｜{platform}｜{price}｜购于 {day}"
 
 
-def compose_prompt(messages: list[ChatTurnSchema], rows: list[PurchaseRecord]) -> str:
-    context = ""
-    if rows:
-        lines = "\n".join(_format_line(row) for row in rows)
-        context = f"【用户已购商品（本次咨询指定）】\n{lines}\n\n"
-
-    # call_model 已支持 messages 列表；这里仍把多轮历史摊平进单个 user prompt
-    # （改真多轮是后续优化，本次合并 gitee/main 只做签名适配）
-    turns = messages[:-1]
-    history = ""
-    if turns:
-        body = "".join(f"{'用户' if item.role == 'user' else '助手'}：{item.content}\n" for item in turns)
-        history = f"【最近对话】\n{body}\n"
-
-    return _TEMPLATE.format(context=context, history=history, question=messages[-1].content.strip())
-
-
-async def answer(user_id: int, messages: list[ChatTurnSchema], record_ids: list[int],
-                 session: AsyncSession) -> dict:
-    rows = await load_focus_records(user_id, record_ids, session)
+def _format_item(src: str, item_id: int, name: str, specs: dict) -> str:
+    safe_name = " ".join(name.split())
+    pairs = "；".join(f"{k}: {v}" for k, v in (specs or {}).items())
+    head = f"{src}#{item_id} {safe_name}"
+    return f"{head}｜{pairs}" if pairs else head
+async def send_message(user_id: int, payload: ChatSendInSchema,session: AsyncSession,background_tasks: BackgroundTasks)->ChatSendOutSchema:
+    if payload.conversation_id is None:
+        conversation = await conversation_repo.create_conversation(
+            user_id, _fallback_title(payload.text), session)
+    else:
+        conversation = await conversation_repo.get_conversation(
+            user_id, payload.conversation_id, session)
+        if conversation is None:
+            raise BizError(ErrorCode.PARAM_INVALID, "会话不存在")
+    conversation_id = conversation.id
+    await chat_repo.add_message(user_id, conversation_id, "user",payload.text, session)
+    items = await chat_repo.fetch_items_for_refs(user_id, payload.item_refs, session)
+    history = _cap_history(chat_repo.trim_trailing_users(
+        await chat_repo.recent_messages(user_id, conversation_id, _HISTORY_LIMIT, session)))
+    profile_context = await profile_service.load_profile_context(user_id, session)
+    system = SYSTEM_PROMPT if not profile_context else f"{SYSTEM_PROMPT}\n\n{profile_context}"
+    messages = [{"role": "system", "content": system}]
+    messages.extend({"role": m.role, "content": m.content} for m in history)
+    current = payload.text
+    if items:
+        block = "\n".join(_format_item(src, item_id, name, specs)
+                          for src, item_id, name, specs in items)
+        current = f"【用户引用商品】\n{block}\n\n{current}"
+    messages.append({"role": "user", "content": current})
     try:
-        content, model = await model_call.call_model(
-            user_id, [{"role": "user", "content": compose_prompt(messages, rows)}], session)
+        reply, model = await model_call.call_model(user_id, messages, session)
     except model_call.ModelCallError as exc:
+# str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
-    return {"content": content, "model": model}
+
+# ⑦ assistant 落库 + 推进会话 update_time（否则列表排序停摆，见 touch 注释）
+    await chat_repo.add_message(user_id, conversation_id, "assistant", reply,
+                                session, model=model)
+    await conversation_repo.touch_conversation( user_id, conversation_id,session)
+    background_tasks.add_task(profile_service.refresh_profile, user_id, conversation_id)
+    return ChatSendOutSchema(conversation_id=conversation_id, reply=reply, model=model)

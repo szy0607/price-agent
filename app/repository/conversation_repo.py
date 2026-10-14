@@ -1,9 +1,9 @@
-from sqlalchemy import update
+from sqlalchemy import update, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError, ErrorCode
 from app.models import Conversation
-
+from app.core.time import get_current_time
 
 async def update_title(
         conversation_id: int, title: str, user_id: int,
@@ -34,3 +34,29 @@ async def create_conversation(user_id:int,title:str,session:AsyncSession) -> Con
     await session.commit()
     await session.refresh(conversation)
     return conversation
+async def get_conversation(user_id:int,conversation_id:int,session:AsyncSession) -> Conversation | None:
+    result = await session.scalars(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+    )
+    return result.first()
+async def touch_conversation(user_id:int,conversation_id:int,session:AsyncSession) :
+
+    await session.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+        .values(update_time=get_current_time())
+    )
+    await session.commit()
+async def list_conversations(user_id:int,limit:int,session:AsyncSession) -> list[Conversation]:
+    """当前用户的会话列表，最近更新的在前。
+
+    update_time 由 send_message 末尾的 touch_conversation 推进，所以排序即
+    「最近聊过」；同秒内 touch 的会话用 id desc 兜底定序，避免翻页时抖动。
+    """
+    result = await session.scalars(
+        select(Conversation)
+        .where(Conversation.user_id == user_id)
+        .order_by(Conversation.update_time.desc(), Conversation.id.desc())
+        .limit(limit)
+    )
+    return list(result.all())
