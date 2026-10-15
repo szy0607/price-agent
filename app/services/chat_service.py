@@ -36,6 +36,7 @@ def _format_item(src: str, item_id: int, name: str, specs: dict) -> str:
     head = f"{src}#{item_id} {safe_name}"
     return f"{head}｜{pairs}" if pairs else head
 async def send_message(user_id: int, payload: ChatSendInSchema,session: AsyncSession,background_tasks: BackgroundTasks)->ChatSendOutSchema:
+    items = await chat_repo.fetch_items_for_refs(user_id, payload.item_refs, session)
     if payload.conversation_id is None:
         conversation = await conversation_repo.create_conversation(
             user_id, _fallback_title(payload.text), session)
@@ -45,8 +46,7 @@ async def send_message(user_id: int, payload: ChatSendInSchema,session: AsyncSes
         if conversation is None:
             raise BizError(ErrorCode.PARAM_INVALID, "会话不存在")
     conversation_id = conversation.id
-    await chat_repo.add_message(user_id, conversation_id, "user",payload.text, session)
-    items = await chat_repo.fetch_items_for_refs(user_id, payload.item_refs, session)
+
     history = _cap_history(chat_repo.trim_trailing_users(
         await chat_repo.recent_messages(user_id, conversation_id, _HISTORY_LIMIT, session)))
     profile_context = await profile_service.load_profile_context(user_id, session)
@@ -58,15 +58,15 @@ async def send_message(user_id: int, payload: ChatSendInSchema,session: AsyncSes
         block = "\n".join(_format_item(src, item_id, name, specs)
                           for src, item_id, name, specs in items)
         current = f"【用户引用商品】\n{block}\n\n{current}"
+    await chat_repo.add_message(user_id, conversation_id, "user",current, session)
     messages.append({"role": "user", "content": current})
     try:
         reply, model = await model_call.call_model(user_id, messages, session)
     except model_call.ModelCallError as exc:
-        # str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url
-        # 泄漏（10-13 P0 口径，别一刀切覆盖成笼统文案）。
+# str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
 
-    # assistant 落库 + 推进会话 update_time（否则列表排序停摆，见 touch 注释）
+# assistant 落库 + 推进会话 update_time（否则列表排序停摆，见 touch 注释）
     await chat_repo.add_message(user_id, conversation_id, "assistant", reply,
                                 session, model=model)
     await conversation_repo.touch_conversation( user_id, conversation_id,session)

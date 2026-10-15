@@ -14,4 +14,5 @@ class Settings(BaseSettings):
     captcha_key : str
     bocha_api_key : str|None = None
     api_key_kek : str|None = None
+    pg_url : str|None = None
 settings = Settings()

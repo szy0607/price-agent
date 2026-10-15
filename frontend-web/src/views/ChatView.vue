@@ -3,10 +3,43 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { PhArchive, PhChatsCircle, PhCpu, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
-import { listCartItems, listConversations, listConversationMessages, listOwnedItems, resolveImageUrl, sendChatMessage } from '../utils/api'
+import ItemChip from '../components/ItemChip.vue'
+import ItemRow from '../components/ItemRow.vue'
+import { listCartItems, listConversations, listConversationMessages, listOwnedItems, sendChatMessage } from '../utils/api'
 
-const placeholderImage = `${import.meta.env.BASE_URL}images/placeholder-item.png`
-function imageFallback(event) { event.target.src = placeholderImage }
+// 后端 item_refs 上限，与 chat_sche.py 的 max_length=5 同口径：前端先拦，
+// 否则第 6 件能勾上但发送必被 pydantic 拒（40001）
+const MAX_REFS = 5
+const REF_MARK = '【用户引用商品】'
+
+// user 消息落库时是「【用户引用商品】\n<每行一条 src#id 名称｜specs>\n\n原话」
+// （后端 chat_service._format_item 的格式）。这里拆回结构化 refs + 原话渲染，
+// 免得历史消息把商品块原文裸露给用户。拆不动就整体当纯文本，不丢内容。
+function parseUserContent(content) {
+  const raw = content || ''
+  if (!raw.startsWith(REF_MARK)) return { refs: [], text: raw }
+  const rest = raw.slice(REF_MARK.length)
+  const cut = rest.indexOf('\n\n')
+  if (cut === -1) return { refs: [], text: raw }
+  const refs = rest.slice(0, cut).split('\n').filter(Boolean).map((line) => {
+    const matched = /^([a-z]+)#(\d+)\s+(.*)$/.exec(line)
+    if (!matched) return null
+    const name = matched[3].split('｜')[0].trim()
+    return name ? { src: matched[1], id: Number(matched[2]), name } : null
+  }).filter(Boolean)
+  if (!refs.length) return { refs: [], text: raw }
+  return { refs, text: rest.slice(cut + 2) }
+}
+
+// 消息统一结构 { id, role, text, refs, model }：历史加载与乐观上屏走同一形状，
+// 否则同一条消息刷新前后显示不一致（乐观上屏没有商品块文本）
+function toMessage(row) {
+  if (row.role === 'user') {
+    const { refs, text } = parseUserContent(row.content)
+    return { id: row.id, role: row.role, text, refs, model: null }
+  }
+  return { id: row.id, role: row.role, text: row.content, refs: [], model: row.model ?? null }
+}
 
 // ---------- 会话：懒创建，activeConversationId = null 即「新咨询」草稿 ----------
 const conversations = ref([])
@@ -54,10 +87,11 @@ const selectedList = computed(() => [...selectedRefs.value].map((key) => {
 }).filter(Boolean))
 
 function refKey(src, id) { return `${src}:${id}` }
+const atMaxRefs = computed(() => selectedRefs.value.size >= MAX_REFS)
 function toggleRef(src, id) {
   const key = refKey(src, id)
   if (selectedRefs.value.has(key)) selectedRefs.value.delete(key)
-  else selectedRefs.value.add(key)
+  else if (selectedRefs.value.size < MAX_REFS) selectedRefs.value.add(key)
 }
 function removeRef(src, id) { selectedRefs.value.delete(refKey(src, id)) }
 
@@ -100,7 +134,7 @@ async function openConversation(id) {
   loadingMessages.value = true
   errorMessage.value = ''
   try {
-    messages.value = await listConversationMessages(id)
+    messages.value = (await listConversationMessages(id)).map(toMessage)
   } catch (error) {
     errorMessage.value = error.message || '历史消息加载失败'
     messages.value = []
@@ -123,8 +157,10 @@ async function send() {
   if (!text || sending.value) return
   errorMessage.value = ''
   input.value = ''
-  // 乐观上屏：后端先落 user 再调模型、失败也留痕，本地先渲染与库一致
-  messages.value.push({ id: `local-user-${Date.now()}`, role: 'user', content: text })
+  // 乐观上屏：后端先落 user 再调模型、失败也留痕，本地先渲染与库一致。
+  // refs 取快照（拷贝一份），发送成功后清勾选也不会把这条消息的引用清空。
+  const snapshot = selectedList.value.map((ref_) => ({ src: ref_.src, id: ref_.id, name: ref_.name }))
+  messages.value.push({ id: `local-user-${Date.now()}`, role: 'user', text, refs: snapshot, model: null })
   sending.value = true
   scrollToBottom()
   try {
@@ -133,7 +169,10 @@ async function send() {
       text,
       itemRefs: selectedList.value,
     })
-    messages.value.push({ id: `local-reply-${Date.now()}`, role: 'assistant', content: result.reply, model: result.model })
+    messages.value.push({ id: `local-reply-${Date.now()}`, role: 'assistant', text: result.reply, refs: [], model: result.model })
+    // 勾选即「这条消息的附件」，发完即清（10-14 的「跨消息保持」口径废止）；
+    // 只在成功后清——失败时留着让用户直接重试，不必重勾一遍
+    selectedRefs.value.clear()
     if (activeConversationId.value === null) {
       // 懒创建落地：记住服务端返回的真实 id，草稿标题转正，插到列表最前
       activeConversationId.value = result.conversation_id
@@ -208,14 +247,6 @@ onMounted(async () => {
       </div>
 
       <div ref="listRef" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-7">
-        <div v-if="selectedList.length" class="mx-auto mb-5 flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
-          <PhPackage :size="14" class="shrink-0" />
-          <span class="shrink-0">已引用 {{ selectedList.length }} 件商品：</span>
-          <span v-for="ref_ in selectedList" :key="`${ref_.src}-${ref_.id}`" class="inline-flex items-center gap-1 rounded-md bg-white/80 px-1.5 py-0.5 font-medium dark:bg-zinc-900/80">
-            {{ ref_.name }}
-            <button type="button" class="text-blue-400 hover:text-blue-600" :aria-label="`取消引用 ${ref_.name}`" @click="removeRef(ref_.src, ref_.id)"><PhX :size="11" /></button>
-          </span>
-        </div>
         <div v-if="!messages.length && !loadingMessages" class="mx-auto flex h-full max-w-lg flex-col items-center justify-center text-center">
           <BrandIcon :size="35" class="text-accent" />
           <h2 class="mt-5 text-xl font-semibold text-zinc-950 dark:text-white">开始咨询</h2>
@@ -225,7 +256,12 @@ onMounted(async () => {
         <template v-else>
           <div class="mx-auto max-w-3xl space-y-5">
             <div v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-              <div class="max-w-[85%] whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">{{ message.content }}</div>
+              <div class="max-w-[85%] break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">
+                <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
+                  <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
+                </div>
+                <span class="whitespace-pre-wrap">{{ message.text }}</span>
+              </div>
             </div>
             <p v-if="lastReplyModel" class="text-xs text-zinc-400" role="status">本次回复由 {{ lastReplyModel }} 生成</p>
           </div>
@@ -236,6 +272,12 @@ onMounted(async () => {
 
       <div class="shrink-0 border-t border-zinc-200 px-4 py-4 sm:px-7 dark:border-zinc-800">
         <div class="mx-auto max-w-3xl">
+          <!-- 引用区放在输入框这一屏里（不随消息滚动），否则对话一长就看不到自己引了哪些商品 -->
+          <div v-if="selectedList.length" class="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+            <PhPackage :size="14" class="shrink-0" />
+            <span class="shrink-0">已引用 {{ selectedList.length }} 件商品<template v-if="atMaxRefs">（上限 {{ MAX_REFS }} 件）</template>：</span>
+            <ItemChip v-for="ref_ in selectedList" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" removable @remove="removeRef(ref_.src, ref_.id)" />
+          </div>
           <p v-if="errorMessage" class="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{{ errorMessage }} <RouterLink to="/settings" class="underline">查看设置</RouterLink></p>
           <form class="flex items-end gap-2" @submit.prevent="send">
             <textarea v-model="input" rows="2" maxlength="4000" placeholder="输入你的购物问题" class="min-h-12 max-h-32 min-w-0 flex-1 resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm leading-6 text-zinc-900 focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" @keydown.enter.exact.prevent="send"></textarea>
@@ -246,35 +288,54 @@ onMounted(async () => {
       </div>
     </section>
 
-    <!-- 右：商品引用面板（桌面常驻） -->
-    <aside class="hidden min-h-0 flex-col border-l border-zinc-200 bg-white/60 md:flex dark:border-zinc-800 dark:bg-zinc-900/40">
+    <!-- 右：商品引用面板（桌面常驻）。购物车 / 物品库上下各占一半，各自框内独立滚动，
+         所以 min-h-0 不能少——flex 子项默认 min-height:auto，少了它会被内容撑破变整页滚动 -->
+    <aside class="hidden min-h-0 flex-col overflow-hidden border-l border-zinc-200 bg-white/60 md:flex dark:border-zinc-800 dark:bg-zinc-900/40">
       <div class="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-medium text-zinc-800 dark:border-zinc-800 dark:text-zinc-200">
         <PhPackage :size="16" />引用商品
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        <template v-if="cartItems.length || ownedItems.length">
-          <div v-if="cartItems.length" class="mb-4">
-            <div class="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-medium text-zinc-500"><PhShoppingCart :size="13" />购物车（想买）</div>
-            <button v-for="item in cartItems" :key="`cart-${item.id}`" type="button" class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800" :class="selectedRefs.has(refKey('cart', item.id)) ? 'bg-accent/10 ring-1 ring-accent/40' : ''" @click="toggleRef('cart', item.id)">
-              <img :src="resolveImageUrl(item.image) || placeholderImage" :alt="item.name" class="h-9 w-9 shrink-0 rounded-md object-cover" @error="imageFallback" />
-              <span class="min-w-0 flex-1"><span class="block truncate text-sm text-zinc-800 dark:text-zinc-200">{{ item.name }}</span><span class="block truncate text-xs text-zinc-400">{{ item.category || '未分类' }}</span></span>
-              <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border" :class="selectedRefs.has(refKey('cart', item.id)) ? 'border-accent bg-accent text-white' : 'border-zinc-300 dark:border-zinc-600'"><span v-if="selectedRefs.has(refKey('cart', item.id))" class="text-[10px] leading-none">✓</span></span>
-            </button>
-          </div>
-          <div v-if="ownedItems.length">
-            <div class="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-medium text-zinc-500"><PhArchive :size="13" />物品库（已持有）</div>
-            <button v-for="item in ownedItems" :key="`owned-${item.id}`" type="button" class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800" :class="selectedRefs.has(refKey('owned', item.id)) ? 'bg-accent/10 ring-1 ring-accent/40' : ''" @click="toggleRef('owned', item.id)">
-              <img :src="resolveImageUrl(item.image) || placeholderImage" :alt="item.name" class="h-9 w-9 shrink-0 rounded-md object-cover" @error="imageFallback" />
-              <span class="min-w-0 flex-1"><span class="block truncate text-sm text-zinc-800 dark:text-zinc-200">{{ item.name }}</span><span class="block truncate text-xs text-zinc-400">{{ item.category || '未分类' }}</span></span>
-              <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border" :class="selectedRefs.has(refKey('owned', item.id)) ? 'border-accent bg-accent text-white' : 'border-zinc-300 dark:border-zinc-600'"><span v-if="selectedRefs.has(refKey('owned', item.id))" class="text-[10px] leading-none">✓</span></span>
-            </button>
-          </div>
-        </template>
-        <div v-else class="px-2 py-6 text-center text-xs text-zinc-400">
-          还没有商品<br />去 <RouterLink to="/cart" class="text-accent underline">购物车</RouterLink> 或 <RouterLink to="/items" class="text-accent underline">物品库</RouterLink> 添加
+
+      <div class="flex min-h-0 flex-1 flex-col border-b border-zinc-200 dark:border-zinc-800">
+        <div class="flex shrink-0 items-center gap-1.5 px-4 py-2 text-xs font-medium text-zinc-500">
+          <PhShoppingCart :size="13" />购物车（想买）<span class="text-zinc-400">{{ cartItems.length }}</span>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <ItemRow
+            v-for="item in cartItems"
+            :key="`cart-${item.id}`"
+            :item="item"
+            src="cart"
+            :selected="selectedRefs.has(refKey('cart', item.id))"
+            :disabled="atMaxRefs && !selectedRefs.has(refKey('cart', item.id))"
+            @toggle="toggleRef('cart', item.id)"
+          />
+          <p v-if="!cartItems.length" class="px-2 py-4 text-center text-xs text-zinc-400">
+            购物车还没有商品<br /><RouterLink to="/cart" class="text-accent underline">去添加</RouterLink>
+          </p>
         </div>
       </div>
-      <p class="shrink-0 border-t border-zinc-200 px-4 py-2.5 text-xs text-zinc-400 dark:border-zinc-800">勾选的商品会随每条消息一起发给模型参考</p>
+
+      <div class="flex min-h-0 flex-1 flex-col">
+        <div class="flex shrink-0 items-center gap-1.5 px-4 py-2 text-xs font-medium text-zinc-500">
+          <PhArchive :size="13" />物品库（已持有）<span class="text-zinc-400">{{ ownedItems.length }}</span>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <ItemRow
+            v-for="item in ownedItems"
+            :key="`owned-${item.id}`"
+            :item="item"
+            src="owned"
+            :selected="selectedRefs.has(refKey('owned', item.id))"
+            :disabled="atMaxRefs && !selectedRefs.has(refKey('owned', item.id))"
+            @toggle="toggleRef('owned', item.id)"
+          />
+          <p v-if="!ownedItems.length" class="px-2 py-4 text-center text-xs text-zinc-400">
+            物品库还没有商品<br /><RouterLink to="/items" class="text-accent underline">去添加</RouterLink>
+          </p>
+        </div>
+      </div>
+
+      <p class="shrink-0 border-t border-zinc-200 px-4 py-2.5 text-xs text-zinc-400 dark:border-zinc-800">最多引用 {{ MAX_REFS }} 件，发送后自动清空</p>
     </aside>
   </div>
 
@@ -290,19 +351,27 @@ onMounted(async () => {
         <template v-if="cartItems.length || ownedItems.length">
           <div v-if="cartItems.length" class="mb-4">
             <div class="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-medium text-zinc-500"><PhShoppingCart :size="13" />购物车（想买）</div>
-            <button v-for="item in cartItems" :key="`m-cart-${item.id}`" type="button" class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800" :class="selectedRefs.has(refKey('cart', item.id)) ? 'bg-accent/10 ring-1 ring-accent/40' : ''" @click="toggleRef('cart', item.id)">
-              <img :src="resolveImageUrl(item.image) || placeholderImage" :alt="item.name" class="h-9 w-9 shrink-0 rounded-md object-cover" @error="imageFallback" />
-              <span class="min-w-0 flex-1"><span class="block truncate text-sm text-zinc-800 dark:text-zinc-200">{{ item.name }}</span><span class="block truncate text-xs text-zinc-400">{{ item.category || '未分类' }}</span></span>
-              <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border" :class="selectedRefs.has(refKey('cart', item.id)) ? 'border-accent bg-accent text-white' : 'border-zinc-300 dark:border-zinc-600'"><span v-if="selectedRefs.has(refKey('cart', item.id))" class="text-[10px] leading-none">✓</span></span>
-            </button>
+            <ItemRow
+              v-for="item in cartItems"
+              :key="`m-cart-${item.id}`"
+              :item="item"
+              src="cart"
+              :selected="selectedRefs.has(refKey('cart', item.id))"
+              :disabled="atMaxRefs && !selectedRefs.has(refKey('cart', item.id))"
+              @toggle="toggleRef('cart', item.id)"
+            />
           </div>
           <div v-if="ownedItems.length">
             <div class="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-medium text-zinc-500"><PhArchive :size="13" />物品库（已持有）</div>
-            <button v-for="item in ownedItems" :key="`m-owned-${item.id}`" type="button" class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800" :class="selectedRefs.has(refKey('owned', item.id)) ? 'bg-accent/10 ring-1 ring-accent/40' : ''" @click="toggleRef('owned', item.id)">
-              <img :src="resolveImageUrl(item.image) || placeholderImage" :alt="item.name" class="h-9 w-9 shrink-0 rounded-md object-cover" @error="imageFallback" />
-              <span class="min-w-0 flex-1"><span class="block truncate text-sm text-zinc-800 dark:text-zinc-200">{{ item.name }}</span><span class="block truncate text-xs text-zinc-400">{{ item.category || '未分类' }}</span></span>
-              <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border" :class="selectedRefs.has(refKey('owned', item.id)) ? 'border-accent bg-accent text-white' : 'border-zinc-300 dark:border-zinc-600'"><span v-if="selectedRefs.has(refKey('owned', item.id))" class="text-[10px] leading-none">✓</span></span>
-            </button>
+            <ItemRow
+              v-for="item in ownedItems"
+              :key="`m-owned-${item.id}`"
+              :item="item"
+              src="owned"
+              :selected="selectedRefs.has(refKey('owned', item.id))"
+              :disabled="atMaxRefs && !selectedRefs.has(refKey('owned', item.id))"
+              @toggle="toggleRef('owned', item.id)"
+            />
           </div>
         </template>
         <div v-else class="px-2 py-6 text-center text-xs text-zinc-400">

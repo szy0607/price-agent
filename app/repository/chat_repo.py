@@ -76,7 +76,7 @@ async def fetch_items_for_refs(
     for r in refs:
         key = (r.src, r.id)
         if key not in found:
-            raise BizError(ErrorCode.PARAM_INVALID, "引用的商品不存在")
+            raise BizError(ErrorCode.PARAM_INVALID, "引用的商品已变更，请刷新后重新添加")
         name, specs = found[key]
         out.append((r.src, r.id, name, specs))
     return out

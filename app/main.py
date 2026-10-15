@@ -21,7 +21,8 @@ from app.database.session import async_session_local
 from app.router.image_file import image_file_router
 from app.router.setting import settings_router
 from app.router.upload import upload_router
-from app.services import image_service, image_store, model_call
+from app.services import image_service
+from app.database.pg_session import start_pg_engine, close_pg_engine
 
 # 图片清理间隔：pending 超 24h / released 的文件与行。幂等，多 worker 重复跑无害
 _IMAGE_CLEANUP_INTERVAL = 3600
@@ -44,12 +45,15 @@ async def lifespan(app: FastAPI):
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # INFO 级访问行不再输出
 
     start_http_client()
+    start_pg_engine()
+
     cleanup_task = asyncio.create_task(_image_cleanup_loop())
     try:
         yield
     finally:
         cleanup_task.cancel()
         await close_http_client()
+        await close_pg_engine()
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 setup_logging()

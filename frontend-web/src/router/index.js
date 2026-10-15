@@ -9,8 +9,6 @@ const routes = [
   { path: '/items', name: 'items', component: () => import('../views/ItemsView.vue'), meta: { title: '物品库', requiresAuth: true } },
   { path: '/groups', name: 'groups', component: () => import('../views/GroupView.vue'), meta: { title: '购物分组', requiresAuth: true } },
   { path: '/groups/:id', name: 'group-detail', component: () => import('../views/GroupView.vue'), meta: { title: '分组详情', requiresAuth: true } },
-  { path: '/compare', name: 'compare', component: () => import('../views/CompareView.vue'), meta: { title: '款式对比', requiresAuth: true } },
-  { path: '/coupon', name: 'coupon', component: () => import('../views/CouponView.vue'), meta: { title: '领券指引', requiresAuth: true } },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: '设置', requiresAuth: true } },
   // v0.6 新增功能：内容未开发，先注册占位路由（ComingSoonView 按 route.name 取对应占位信息）
   { path: '/wishlist', name: 'wishlist', component: () => import('../views/ComingSoonView.vue'), meta: { title: '心愿单与购买决策', requiresAuth: true } },

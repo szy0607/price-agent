@@ -58,3 +58,4 @@ pydantic-settings>=2.2
 email-validator>=2.1
 # bcrypt：直接用，别配 passlib。passlib 1.7.4 读不到 bcrypt 4.x 的 __about__，会告警甚至报错
 bcrypt>=4.1
+asyncpg>=0.29
