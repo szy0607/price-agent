@@ -9,6 +9,7 @@ from .chat_message import ChatMessage
 from .conversation import Conversation
 from .user_profile import UserProfile
 from .user_api_key import UserApiKey
+from .user_embedding_key import UserEmbeddingKey
 from .image import Image
 __all__ = [
     "User",
@@ -22,5 +23,6 @@ __all__ = [
     "Conversation",
     "UserProfile",
     "UserApiKey",
+    "UserEmbeddingKey",
     "Image",
 ]
