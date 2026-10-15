@@ -93,6 +93,34 @@ export function setDefaultApiKey(id) {
   })
 }
 
+export function listEmbeddingKeys() {
+  return apiRequest('/setting/embedding-keys')
+}
+
+export function createEmbeddingKey({ provider, base_url, api_key, model_name }) {
+  return apiRequest('/setting/embedding-keys', {
+    method: 'POST',
+    body: JSON.stringify({ provider, base_url, api_key, model_name }),
+  })
+}
+
+export function updateEmbeddingKey(id, { provider, base_url, api_key, model_name }) {
+  return apiRequest(`/setting/embedding-keys/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ provider, base_url, api_key, model_name }),
+  })
+}
+
+export function deleteEmbeddingKey(id) {
+  return apiRequest(`/setting/embedding-keys/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function setDefaultEmbeddingKey(id) {
+  return apiRequest(`/setting/embedding-keys/${encodeURIComponent(id)}/default`, {
+    method: 'PUT',
+  })
+}
+
 // 新版对话契约：conversation_id 懒创建（首条消息传 null，后端返回真实 id），
 // item_refs 是右侧面板勾选的商品引用（src: cart/owned + id）。
 export function sendChatMessage({ conversationId = null, text, itemRefs = [] }) {
