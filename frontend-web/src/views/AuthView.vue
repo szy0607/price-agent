@@ -29,6 +29,8 @@ const demoProducts = [
   { id: 4, tag: '消费洞察', name: '支出与预算', note: '月度支出、品类分布一目了然', image: `${import.meta.env.BASE_URL}images/cap-spend.png` },
 ]
 const showcase = demoProducts[0]
+const vectorIcon = `${import.meta.env.BASE_URL}images/cap-vector.png`
+const groupIcon = `${import.meta.env.BASE_URL}images/cap-group.png`
 
 // 多智能体长链路（节点用代码渲染，避免位图背景与页面色差）
 const flowIcons = {
@@ -56,7 +58,6 @@ const sectionLinks = [
   { id: 'chat-placeholder', label: '智能咨询' },
   { id: 'spending-placeholder', label: '消费记录' },
 ]
-let sectionObserver
 
 async function loadCaptcha() {
   captchaLoading.value = true
@@ -83,13 +84,25 @@ function switchMode(nextMode) {
 
 onMounted(() => {
   if (!isRegister()) loadCaptcha()
-  sectionObserver = new IntersectionObserver((entries) => {
-    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
-    if (visible) activeSection.value = visible.target.id
-  }, { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.25, 0.5] })
-  sectionLinks.forEach((item) => document.getElementById(item.id) && sectionObserver.observe(document.getElementById(item.id)))
+  updateActiveSection()
+  window.addEventListener('scroll', updateActiveSection, { passive: true })
 })
-onBeforeUnmount(() => sectionObserver?.disconnect())
+onBeforeUnmount(() => window.removeEventListener('scroll', updateActiveSection))
+
+function updateActiveSection() {
+  const mid = window.innerHeight * 0.35
+  let current = sectionLinks[0].id
+  for (const item of sectionLinks) {
+    const el = document.getElementById(item.id)
+    if (el && el.getBoundingClientRect().top <= mid) current = item.id
+  }
+  activeSection.value = current
+}
+
+function scrollToSection(id) {
+  activeSection.value = id
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 async function submit() {
   errorMessage.value = ''
@@ -152,7 +165,7 @@ async function submit() {
         <span><small>SHOP INTELLIGENCE</small><b>PRICE AGENT</b></span>
       </RouterLink>
       <nav class="vertex-links" aria-label="页面导航">
-        <a v-for="item in sectionLinks" :key="item.id" :href="`#${item.id}`" :class="{ 'is-active': activeSection === item.id }" @click="activeSection = item.id">{{ item.label }}</a>
+        <a v-for="item in sectionLinks" :key="item.id" href="javascript:void(0)" :class="{ 'is-active': activeSection === item.id }" @click="scrollToSection(item.id)">{{ item.label }}</a>
       </nav>
     </header>
 
@@ -167,7 +180,6 @@ async function submit() {
           <div><span>{{ showcase.tag }}</span><strong>{{ showcase.name }}</strong><small>{{ showcase.note }}</small></div>
         </div>
         <div class="vertex-insight-grid">
-          <article><small>支持平台</small><strong>3 个</strong><span>淘宝 · 京东 · 拼多多</span></article>
           <article><small>能力</small><strong>AI 咨询</strong><span>按预算和场景筛选</span></article>
           <article><small>数据</small><strong>参数库</strong><span>已购商品档案化</span></article>
         </div>
@@ -215,11 +227,19 @@ async function submit() {
           <img :src="demoProducts[2].image" :alt="demoProducts[2].name" />
           <div><strong>{{ demoProducts[2].name }}</strong><span>{{ demoProducts[2].tag }}</span></div>
         </article>
+        <article class="vertex-cart-item">
+          <img :src="vectorIcon" alt="向量化构建" />
+          <div><strong>向量化构建</strong><span>语义索引</span></div>
+        </article>
+        <article class="vertex-cart-item">
+          <img :src="groupIcon" alt="物品分组" />
+          <div><strong>物品分组</strong><span>分类整理</span></div>
+        </article>
       </div>
     </section>
 
-    <section id="chat-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div><a href="#auth-form-section" class="vertex-btn vertex-btn--small"><span>登录后开始</span></a></div><div class="agent-flow"><template v-for="(node, i) in flowNodes" :key="node.icon"><div class="agent-flow__node"><span class="agent-flow__icon"><component :is="flowIcons[node.icon]" :size="26" /></span><span class="agent-flow__label">{{ node.label }}</span></div><div v-if="i < flowNodes.length - 1" class="agent-flow__arrow" aria-hidden="true">→</div></template></div></section>
-    <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div><span class="vertex-placeholder__badge">即将填入</span></div><div class="spend-mock"><div class="spend-mock__total"><small>本月支出</small><b>¥3,280</b><span>较上月 <em>-8%</em></span></div><div class="spend-mock__bars" aria-hidden="true"><i style="--h:42%"></i><i style="--h:60%"></i><i style="--h:35%"></i><i style="--h:72%"></i><i style="--h:55%"></i><i style="--h:88%"></i><i style="--h:64%"></i></div><div class="spend-mock__donut" aria-hidden="true"></div></div></section>
+    <section id="chat-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SMART CHAT</span><h2>智能咨询，等你来问</h2><p>登录后可以直接描述预算、场景或商品链接，让 Agent 帮你整理下一步。</p></div></div><div class="agent-flow"><template v-for="(node, i) in flowNodes" :key="node.icon"><div class="agent-flow__node"><span class="agent-flow__icon"><component :is="flowIcons[node.icon]" :size="26" /></span><span class="agent-flow__label">{{ node.label }}</span></div><div v-if="i < flowNodes.length - 1" class="agent-flow__arrow" aria-hidden="true">→</div></template></div></section>
+    <section id="spending-placeholder" class="vertex-content-section vertex-placeholder vertex-placeholder--muted vertex-placeholder--chat"><div class="vertex-placeholder__row"><div><span class="vertex-kicker">SPENDING INSIGHTS</span><h2>消费记录与预算</h2><p>这里会展示月度支出、品类分布和待买预算，登录后逐步完善。</p></div></div><div class="spend-mock"><div class="spend-mock__card"><small>金额维度</small><b>购物金额统计</b><span>月度总支出、单笔均价与同比趋势</span></div><div class="spend-mock__card"><small>渠道维度</small><b>购物平台分布</b><span>淘宝、京东、拼多多等平台支出占比</span></div><div class="spend-mock__card"><small>品类维度</small><b>品类消费占比</b><span>数码、家居、服饰等品类花费结构</span></div><div class="spend-mock__chart"><div class="spend-mock__bars" aria-hidden="true"><i style="--h:42%"></i><i style="--h:60%"></i><i style="--h:35%"></i><i style="--h:72%"></i><i style="--h:55%"></i><i style="--h:88%"></i><i style="--h:64%"></i></div><div class="spend-mock__donut" aria-hidden="true"></div></div></div></section>
   </main>
 </template>
 
@@ -718,10 +738,44 @@ async function submit() {
   }
 }
 
-/* 覆盖全局 .vertex-library-card 图片区：让方形概念图在固定高度区内等比完整显示 */
+/* 覆盖全局 .vertex-library-card 图片区：让方形概念图在固定高度区内等比完整显示、不溢出 */
+.vertex-library-card__image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
 .vertex-library-card__image img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
   object-fit: contain;
   opacity: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 去掉"支持平台"卡片后，指标网格两列 */
+.vertex-insight-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 核心能力卡片：四宫格 2×2 */
+.vertex-library-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 购物车候选列表：宽屏下一行四列，中等屏两列，窄屏一列 */
+.vertex-cart-list {
+  max-width: none;
+}
+
+@media (min-width: 1280px) {
+  .vertex-cart-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 /* 智能咨询区块：文字按钮一行，下方通栏放多智能体链路插图 */
@@ -786,43 +840,56 @@ async function submit() {
   font-size: 18px;
 }
 
-/* 消费记录示意：本月支出 + 月度柱图 + 品类环形占比 */
+/* 消费记录示意：三个文字说明卡片（金额 / 渠道 / 品类） */
 .spend-mock {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) 96px;
-  gap: 28px;
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
   margin-top: 36px;
-  padding: 26px 28px;
-  border-radius: 18px;
+}
+
+.spend-mock__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid #e6edf7;
   background: #fff;
-  box-shadow: 0 18px 50px rgb(38 65 106 / 0.08);
+  box-shadow: 0 10px 28px rgb(38 65 106 / 0.06);
 }
 
-.spend-mock__total small {
+.spend-mock__card small {
   color: #78869a;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
-.spend-mock__total b {
-  display: block;
-  margin-top: 6px;
+.spend-mock__card b {
   color: #172033;
-  font-size: 30px;
+  font-size: 17px;
   font-weight: 700;
 }
 
-.spend-mock__total span {
-  display: block;
-  margin-top: 6px;
+.spend-mock__card span {
+  margin-top: 2px;
   color: #78869a;
-  font-size: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
-.spend-mock__total em {
-  color: #16a34a;
-  font-style: normal;
-  font-weight: 600;
+.spend-mock__chart {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 32px;
+  padding: 26px 28px;
+  border-radius: 16px;
+  border: 1px solid #e6edf7;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(38 65 106 / 0.06);
 }
 
 .spend-mock__bars {
@@ -854,8 +921,9 @@ async function submit() {
     grid-template-columns: 1fr;
   }
 
-  .spend-mock__donut {
-    justify-self: start;
+  .spend-mock__chart {
+    grid-template-columns: 1fr;
+    justify-items: center;
   }
 }
 </style>
