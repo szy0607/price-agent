@@ -52,4 +52,7 @@ class MessageOutSchema(BaseModel):
     role: str
     content: str
     model: str | None
+    # 生成结局：completed / interrupted / failed。前端据此显示「已停止 / 生成失败」
+    # 角标——缺这个字段，刷新页面后角标就没了（设计文档 §6.3）。
+    status: str
     create_time: datetime

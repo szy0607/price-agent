@@ -21,10 +21,12 @@ from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.errors import ErrorCode
+from app.core.key_crypto import encrypt
 from app.core.security import hash_password
 from app.database.session import async_engine, async_session_local
 from app.main import app
-from app.models import ChatMessage, Conversation, PurchaseRecord, User, UserProfile, UserSession
+from app.models import (ChatMessage, Conversation, PurchaseRecord, User, UserApiKey,
+                        UserProfile, UserSession)
 from app.services import model_call, profile_service
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -132,7 +134,12 @@ def _login_payload(email: str) -> dict:
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def shopper():
-    """一个测试用户；画像/会话/消息由各测试自建自清，finally 收尾全删。"""
+    """一个测试用户；画像/会话/消息由各测试自建自清，finally 收尾全删。
+
+    顺带挂一条可用默认 key：2026-10-16 起 `prepare_chat` 会先 `key_for_call`
+    （取 key 的责任从 call_model 内部上移），没有 key 时 /chat/message 直接 400。
+    模型调用仍由各测试 monkeypatch，这个假 key 永不出网。
+    """
     _require_mysql()
     async with async_session_local() as db:
         async with db.begin():
@@ -141,6 +148,10 @@ async def shopper():
             db.add(user)
             await db.flush()
             uid = user.id
+            db.add(UserApiKey(
+                user_id=uid, provider="test", base_url="https://api.deepseek.com",
+                encrypted_key=encrypt("sk-test-not-a-real-key"), key_suffix="testkey",
+                status="active", model_name="fake-model", is_default=True))
     try:
         yield uid
     finally:
@@ -153,6 +164,7 @@ async def shopper():
                 await db.execute(delete(Conversation).where(Conversation.user_id == uid))
                 await db.execute(delete(UserProfile).where(UserProfile.user_id == uid))
                 await db.execute(delete(UserSession).where(UserSession.user_id == uid))
+                await db.execute(delete(UserApiKey).where(UserApiKey.user_id == uid))
                 await db.execute(delete(User).where(User.id == uid))
 
 
@@ -162,10 +174,14 @@ async def _email_of(uid: int) -> str:
 
 
 def _patch_both(monkeypatch, a6_reply: str) -> dict:
-    """按 system prompt 分流：A6 的 prompt 返回画像裁决，chat 的返回普通回复。"""
+    """按 system prompt 分流：A6 的 prompt 返回画像裁决，chat 的返回普通回复。
+
+    mock 签名跟着 2026-10-16 的 call_model 改造走：收 KeyRecord、不再收
+    user_id / session（key 由调用方在自己的 session 里查好传入）。
+    """
     seen: dict = {}
 
-    async def fake_call(user_id, messages, session, **kwargs):
+    async def fake_call(key, messages, **kwargs):
         if messages and messages[0]["content"] == profile_service.PROFILE_SYSTEM_PROMPT:
             seen["a6_input"] = messages[1]["content"]
             return a6_reply, "fake-model"
@@ -233,7 +249,7 @@ async def test_refresh_profile_no_update_keeps_update_time(shopper, monkeypatch)
 
 async def test_refresh_profile_swallows_model_error(shopper, monkeypatch):
     """A6 模型失败只记日志：不 raise，画像保持上一版。"""
-    async def boom(user_id, messages, session, **kwargs):
+    async def boom(key, messages, **kwargs):
         raise model_call.ModelCallError("模型服务已欠费，请前往对应平台充值后重试")
 
     monkeypatch.setattr(model_call, "call_model", boom)

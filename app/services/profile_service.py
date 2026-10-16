@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import async_session_local
 from app.models import PurchaseRecord, UserProfile
 from app.repository import chat_repo, owned_repo
-from app.services import model_call
+from app.services import api_key_service, model_call
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +206,12 @@ async def refresh_profile(user_id: int, conversation_id: int) -> None:
         # detached，那时再访问 row.price / current.preferences 会踩
         # DetachedInstanceError（本项目 MissingGreenlet 一族的老坑）
         async with async_session_local() as session:
-            history = await chat_repo.recent_messages(user_id, conversation_id,
-                                                      _PROFILE_HISTORY, session)
+            # 🔴 与 messages_for_context **故意用不同规则**：completed 原样进、
+            # interrupted 只留「（用户中断了上一轮回答）」事件占位、failed 整条排除。
+            # 防止用户已否决的半截助手自述被当成用户表达喂进长期画像
+            # （设计文档 §0/§4.3）。
+            history = await chat_repo.messages_for_profile(user_id, conversation_id,
+                                                          _PROFILE_HISTORY, session)
             if not history:
                 return
             current = await session.get(UserProfile, user_id)
@@ -224,22 +228,24 @@ async def refresh_profile(user_id: int, conversation_id: int) -> None:
             # 正是 A6 的核心职责（2026-10-14 验收实测，左截断下最新提问整段消失）
             lines, budget = [], _MESSAGE_CAP
             for m in reversed(history):
-                piece = f"{'用户' if m.role == 'user' else '助手'}：{m.content[:_MESSAGE_CAP]}\n"
+                piece = f"{'用户' if m['role'] == 'user' else '助手'}：{m['content'][:_MESSAGE_CAP]}\n"
                 if budget - len(piece) < 0:
                     break
                 lines.append(piece)
                 budget -= len(piece)
             history_text = "".join(reversed(lines))
-        # session ②：调模型（call_model 内部要用 session 查 user_api_key，别空手调）
+        # session ②：调模型。先在同一个 session 里查 KeyRecord 再传出——
+        # call_model 已改成收 KeyRecord 不收 session（2026-10-16 拍板）
         async with async_session_local() as session:
-            verdict, _ = await model_call.call_model(user_id, [
+            key = await api_key_service.key_for_call(user_id, session)
+            verdict, _ = await model_call.call_model(key, [
                 {"role": "system", "content": PROFILE_SYSTEM_PROMPT},
                 {"role": "user", "content": (
                     f"【当前画像】\n{prefs_json[:_EVIDENCE_CAP]}\n\n"
                     f"【行为证据】\n{evidence[:_EVIDENCE_CAP]}\n\n"
                     f"【近期对话】\n{history_text}"
                 )},
-            ], session)
+            ])
         updated, preferences = _parse_verdict(verdict)
         if not updated:
             return  # 防抖动：无变化不写库，update_time 不动

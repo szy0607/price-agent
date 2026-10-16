@@ -28,10 +28,11 @@ from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.errors import ErrorCode
+from app.core.key_crypto import encrypt
 from app.core.security import hash_password
 from app.database.session import async_engine, async_session_local
 from app.main import app
-from app.models import ChatMessage, Conversation, User, UserSession
+from app.models import ChatMessage, Conversation, User, UserApiKey, UserSession
 from app.services import model_call
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -73,6 +74,16 @@ async def pair():
                             username="conv-other", password_hash=hash_password(PASSWORD))
             db.add_all([mine, stranger])
             await db.flush()
+            # 2026-10-16 起 prepare_chat 会先 key_for_call（取 key 责任从 call_model
+            # 内部上移），没有 active+is_default 的 key 时 /chat/message 直接 400。
+            # 模型调用在测试里被 monkeypatch，这个假 key 永不出网。
+            db.add_all([
+                UserApiKey(user_id=mine.id, provider="test",
+                           base_url="https://api.deepseek.com",
+                           encrypted_key=encrypt("sk-test-not-a-real-key"),
+                           key_suffix="testkey", status="active",
+                           model_name="fake-model", is_default=True),
+            ])
             conv1 = Conversation(user_id=mine.id, title="想买的键盘", update_time=stale)
             conv2 = Conversation(user_id=mine.id, title="台灯要不要换", update_time=stale)
             foreign = Conversation(user_id=stranger.id, title="别人的会话", update_time=stale)
@@ -106,6 +117,7 @@ async def pair():
                         await db.execute(delete(ChatMessage).where(ChatMessage.conversation_id == cid))
                     await db.execute(delete(Conversation).where(Conversation.user_id == uid))
                     await db.execute(delete(UserSession).where(UserSession.user_id == uid))
+                    await db.execute(delete(UserApiKey).where(UserApiKey.user_id == uid))
                     await db.execute(delete(User).where(User.id == uid))
 
 
@@ -165,7 +177,7 @@ async def test_send_message_touches_conversation(pair, monkeypatch):
     当前时间并跳到列表最前；参数换位时 WHERE 落空、update_time 停在 2020，
     且列表仍是 id desc 的顺序（conv2 在前）——两个断言专门抓那个 bug。
     """
-    async def fake_call(user_id, messages, session, **kwargs):
+    async def fake_call(key, messages, **kwargs):
         return "好的，看机械键盘。", "fake-model"
 
     monkeypatch.setattr(model_call, "call_model", fake_call)

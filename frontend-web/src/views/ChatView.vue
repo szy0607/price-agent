@@ -1,11 +1,18 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { PhArchive, PhChatsCircle, PhCpu, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhChatsCircle, PhCpu, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import ItemChip from '../components/ItemChip.vue'
 import ItemRow from '../components/ItemRow.vue'
-import { listCartItems, listConversations, listConversationMessages, listOwnedItems, sendChatMessage } from '../utils/api'
+import { marked } from 'marked'
+import { listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage } from '../utils/api'
+
+marked.setOptions({ breaks: true, gfm: true })
+
+function renderMarkdown(text) {
+  return marked.parse(text || '')
+}
 
 // 后端 item_refs 上限，与 chat_sche.py 的 max_length=5 同口径：前端先拦，
 // 否则第 6 件能勾上但发送必被 pydantic 拒（40001）
@@ -31,14 +38,14 @@ function parseUserContent(content) {
   return { refs, text: rest.slice(cut + 2) }
 }
 
-// 消息统一结构 { id, role, text, refs, model }：历史加载与乐观上屏走同一形状，
+// 消息统一结构 { id, role, text, refs, model, status }：历史加载与乐观上屏走同一形状，
 // 否则同一条消息刷新前后显示不一致（乐观上屏没有商品块文本）
 function toMessage(row) {
   if (row.role === 'user') {
     const { refs, text } = parseUserContent(row.content)
-    return { id: row.id, role: row.role, text, refs, model: null }
+    return { id: row.id, role: row.role, text, refs, model: null, status: row.status ?? 'completed' }
   }
-  return { id: row.id, role: row.role, text: row.content, refs: [], model: row.model ?? null }
+  return { id: row.id, role: row.role, text: row.content, refs: [], model: row.model ?? null, status: row.status ?? 'completed' }
 }
 
 // ---------- 会话：懒创建，activeConversationId = null 即「新咨询」草稿 ----------
@@ -55,10 +62,15 @@ const selectedRefs = ref(new Set()) // key 形如 "cart:12" / "owned:3"
 const panelOpen = ref(false) // 移动端抽屉
 
 const input = ref('')
-const sending = ref(false)
+// 四态：idle 空闲 / streaming 正在收字 / stopping 已点停止，等服务端落库 / error 出错
+// stopping 必须单独存在：abort 只是断开连接，服务端还在异步写库，立刻解锁会让用户
+// 连发两条，assistant 缺失导致上下文断裂（设计文档 §5.9）
+const sendState = ref('idle')
+const sending = computed(() => sendState.value !== 'idle')
 const errorMessage = ref('')
 const listRef = ref(null)
 const modelSummary = { label: '默认模型', detail: '由设置中的默认 API Key 提供' }
+const abortRef = ref(null)
 
 // 最近一条 assistant 消息实际用的模型名（后端按 user 消息为 NULL 的口径存的）
 const lastReplyModel = computed(() => {
@@ -75,7 +87,7 @@ const activeTitle = computed(() => {
 
 // 与后端 _fallback_title 同口径：折叠空白、去首尾标点、截断 100——草稿标题先本地算，刷新后以服务端为准
 function fallbackTitle(text) {
-  const folded = ' '.join(text.split()).replace(/^[。！？!?.,，；;：:、~～…\s]+|[。！？!?.,，；;：:、~～…\s]+$/g, '')
+  const folded = text.replace(/\s+/g, ' ').trim().replace(/^[。！？!?.,，；;：:、~～…\s]+|[。！？!?.,，；;：:、~～…\s]+$/g, '')
   return folded.slice(0, 100) || '新咨询'
 }
 
@@ -157,41 +169,121 @@ async function send() {
   if (!text || sending.value) return
   errorMessage.value = ''
   input.value = ''
+  sendState.value = 'streaming'
   // 乐观上屏：后端先落 user 再调模型、失败也留痕，本地先渲染与库一致。
   // refs 取快照（拷贝一份），发送成功后清勾选也不会把这条消息的引用清空。
   const snapshot = selectedList.value.map((ref_) => ({ src: ref_.src, id: ref_.id, name: ref_.name }))
-  messages.value.push({ id: `local-user-${Date.now()}`, role: 'user', text, refs: snapshot, model: null })
-  sending.value = true
+  messages.value.push({ id: `local-user-${Date.now()}`, role: 'user', text, refs: snapshot, model: null, status: 'completed' })
+  // 🔴 assistant 占位气泡必须在 fetch **之前** push：第一个 delta 到达时才有容器可追加。
+  // text 为空 + status='streaming' → 模板渲染成「正在思考…」（meta 到首个 delta 有 1~3 秒空窗，
+  // 这段时间不能白屏，见设计文档 §6.5）
+  const replyId = `local-reply-${Date.now()}`
+  messages.value.push({ id: replyId, role: 'assistant', text: '', refs: [], model: null, status: 'streaming' })
   scrollToBottom()
+
+  const controller = new AbortController()
+  abortRef.value = controller
+  const reply = messages.value[messages.value.length - 1]
+  let interrupted = false
+
   try {
-    const result = await sendChatMessage({
-      conversationId: activeConversationId.value,
-      text,
-      itemRefs: selectedList.value,
-    })
-    messages.value.push({ id: `local-reply-${Date.now()}`, role: 'assistant', text: result.reply, refs: [], model: result.model })
+    await streamChatMessage(
+      {
+        conversationId: activeConversationId.value,
+        text,
+        itemRefs: selectedList.value,
+      },
+      (event, data) => {
+        if (event === 'meta') {
+          reply.model = data.model
+          if (activeConversationId.value === null) {
+            // 懒创建落地：meta 先于任何文本到达，标题转正不用等模型答完
+            activeConversationId.value = data.conversation_id
+            conversations.value.unshift({
+              id: data.conversation_id,
+              title: fallbackTitle(text),
+              update_time: new Date().toISOString(),
+            })
+          } else {
+            const index = conversations.value.findIndex((c) => c.id === activeConversationId.value)
+            if (index > 0) {
+              const [row] = conversations.value.splice(index, 1)
+              conversations.value.unshift(row)
+            }
+          }
+          scrollToBottom()
+        } else if (event === 'delta') {
+          reply.text += data.text
+          scrollToBottom()
+        } else if (event === 'error') {
+          // 后端已翻译成用户可读中文；失败不能只存在于流里，输入框上方也要显示
+          errorMessage.value = data.error
+        } else if (event === 'done') {
+          reply.status = data.status
+          if (data.message_id) reply.id = data.message_id
+          if (data.status === 'interrupted') interrupted = true
+        }
+        // event === 'agent'：子 agent「在调用」提示位，当前后端还没发，先按协议留着
+      },
+      controller.signal,
+    )
+    // 流正常读完：服务端此时已落库，sendState 才回到 idle
+    sendState.value = 'idle'
     // 勾选即「这条消息的附件」，发完即清（10-14 的「跨消息保持」口径废止）；
-    // 只在成功后清——失败时留着让用户直接重试，不必重勾一遍
+    // 只在成功收流后清——失败时留着让用户直接重试，不必重勾一遍
     selectedRefs.value.clear()
-    if (activeConversationId.value === null) {
-      // 懒创建落地：记住服务端返回的真实 id，草稿标题转正，插到列表最前
-      activeConversationId.value = result.conversation_id
-      conversations.value.unshift({ id: result.conversation_id, title: fallbackTitle(text), update_time: new Date().toISOString() })
-    } else {
-      // 已有会话：服务端 touch 已推进 update_time，本地同步把它挪到最前
-      const index = conversations.value.findIndex((c) => c.id === activeConversationId.value)
-      if (index > 0) {
-        const [row] = conversations.value.splice(index, 1)
-        conversations.value.unshift(row)
-      }
-    }
   } catch (error) {
-    errorMessage.value = error.message || '发送失败，请稍后重试。'
+    if (error.name === 'AbortError' || interrupted) {
+      // 主动中断：abort 只断开连接，**服务端还在异步落库**（设计文档 §5.9）。
+      // 立刻解锁会让用户连发两条，而上一条 assistant 可能还没写进去。
+      // 保守做法：先转 stopping，稍后重拉历史确认落库，再解锁。
+      sendState.value = 'stopping'
+      reply.status = 'interrupted'
+      await refreshAfterInterrupt()
+      sendState.value = 'idle'
+    } else {
+      errorMessage.value = error.message || '发送失败，请稍后重试。'
+      // 生成失败：可能是空输出（服务端不落 assistant），把占位气泡撤掉，
+      // 避免留一个永远转圈的空气泡
+      const index = messages.value.findIndex((m) => m.id === replyId)
+      if (index !== -1 && !reply.text) messages.value.splice(index, 1)
+      sendState.value = 'idle'
+    }
   } finally {
-    sending.value = false
+    abortRef.value = null
     scrollToBottom()
   }
 }
+
+// 中断后重拉当前会话，确认服务端真的落库了再解锁输入框。
+// 若那一轮 assistant 没落进去（极端情况），把它补成 interrupted 占位，
+// 免得历史里出现「用户问了但没回答」的空洞。
+async function refreshAfterInterrupt() {
+  const conversationId = activeConversationId.value
+  if (conversationId === null) return
+  try {
+    const rows = await listConversationMessages(conversationId)
+    const fresh = rows.map(toMessage)
+    const lastReply = [...fresh].reverse().find((m) => m.role === 'assistant')
+    if (lastReply && (lastReply.status === 'interrupted' || lastReply.text)) {
+      messages.value = fresh
+      return
+    }
+  } catch {
+    /* 拉不到就保持现状：至少用户还能看到本地那条文本 */
+  }
+}
+
+function stopGenerating() {
+  if (sendState.value !== 'streaming') return
+  sendState.value = 'stopping'
+  abortRef.value?.abort()
+}
+
+onBeforeUnmount(() => {
+  // 切路由/关页面时也要断流，否则生成器还在跑、后台还在写库
+  abortRef.value?.abort()
+})
 
 onMounted(async () => {
   await Promise.all([loadConversations(), loadPickerItems()])
@@ -260,14 +352,25 @@ onMounted(async () => {
                 <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
                   <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
                 </div>
-                <span class="whitespace-pre-wrap">{{ message.text }}</span>
+                <!-- 🔴 没有文本且status='streaming' = 占位气泡。meta 到首个 delta 之间
+                     有 1~3 秒空窗，这段时间渲染成「正在思考…」，不能白屏（设计文档 §6.5） -->
+                <span v-if="message.role === 'assistant' && !message.text" class="text-zinc-400">
+                  {{ message.status === 'streaming' ? '正在思考…' : '' }}
+                  <span v-if="message.status === 'streaming'" class="ml-0.5 inline-block animate-pulse">▍</span>
+                </span>
+                <span v-else-if="message.role === 'assistant'" class="md-body" v-html="renderMarkdown(message.text)"></span>
+                <span v-else class="whitespace-pre-wrap">{{ message.text }}</span>
+                <!-- 生成结局角标：中断/失败在刷新后也要看得见，所以历史消息也渲染
+                     （status 来自后端 MessageOutSchema，不是前端本地状态） -->
+                <p v-if="message.role === 'assistant' && message.status && message.status !== 'streaming' && message.status !== 'completed'" class="mt-2 text-xs" :class="message.status === 'interrupted' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'">
+                  {{ message.status === 'interrupted' ? '已停止' : '生成失败' }}
+                </p>
               </div>
             </div>
             <p v-if="lastReplyModel" class="text-xs text-zinc-400" role="status">本次回复由 {{ lastReplyModel }} 生成</p>
           </div>
         </template>
         <p v-if="loadingMessages" class="mt-4 text-center text-sm text-zinc-500" role="status">正在加载历史消息…</p>
-        <p v-if="sending" class="mt-4 text-sm text-zinc-500" role="status">正在等待模型回复…</p>
       </div>
 
       <div class="shrink-0 border-t border-zinc-200 px-4 py-4 sm:px-7 dark:border-zinc-800">
@@ -280,8 +383,11 @@ onMounted(async () => {
           </div>
           <p v-if="errorMessage" class="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{{ errorMessage }} <RouterLink to="/settings" class="underline">查看设置</RouterLink></p>
           <form class="flex items-end gap-2" @submit.prevent="send">
-            <textarea v-model="input" rows="2" maxlength="4000" placeholder="输入你的购物问题" class="min-h-12 max-h-32 min-w-0 flex-1 resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm leading-6 text-zinc-900 focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" @keydown.enter.exact.prevent="send"></textarea>
-            <button type="submit" :disabled="!input.trim() || sending" class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent-strong disabled:opacity-50" title="发送" aria-label="发送"><PhPaperPlaneRight :size="19" weight="bold" /></button>
+            <textarea v-model="input" rows="2" maxlength="4000" :placeholder="sendState === 'stopping' ? '正在停止…' : '输入你的购物问题'" :disabled="sendState === 'stopping'" class="min-h-12 max-h-32 min-w-0 flex-1 resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm leading-6 text-zinc-900 focus:border-accent focus:outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white" @keydown.enter.exact.prevent="send"></textarea>
+            <!-- 🔴 stopping 期间按钮保持禁用、不能变回发送：abort 只断开连接，服务端还在
+                 异步写库，立刻解锁会让用户连发两条（设计文档 §5.9） -->
+            <button v-if="sendState === 'streaming'" type="button" class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200" title="停止生成" aria-label="停止生成" @click="stopGenerating"><PhStop :size="18" weight="fill" /></button>
+            <button v-else type="submit" :disabled="!input.trim() || sendState === 'stopping'" class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent-strong disabled:opacity-50" title="发送" aria-label="发送"><PhPaperPlaneRight :size="19" weight="bold" /></button>
           </form>
           <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">价格和优惠以平台页面为准。</p>
         </div>
@@ -383,3 +489,57 @@ onMounted(async () => {
   </div>
   </div>
 </template>
+
+<style scoped>
+.md-body :deep(p) {
+  margin: 0 0 0.6em;
+  line-height: 1.7;
+}
+.md-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.md-body :deep(strong) {
+  font-weight: 600;
+  color: #18181b;
+}
+.md-body :deep(ul), .md-body :deep(ol) {
+  margin: 0.4em 0 0.7em;
+  padding-left: 1.4em;
+}
+.md-body :deep(li) {
+  margin: 0.25em 0;
+  line-height: 1.65;
+}
+.md-body :deep(li::marker) {
+  color: #3b82f6;
+}
+.md-body :deep(code) {
+  background: #f1f5f9;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: ui-monospace, monospace;
+}
+.md-body :deep(blockquote) {
+  margin: 0.5em 0;
+  padding: 0.3em 0.9em;
+  border-left: 3px solid #3b82f6;
+  background: #f8fafc;
+  border-radius: 0 6px 6px 0;
+  color: #475569;
+}
+.md-body :deep(a) {
+  color: #2563eb;
+  text-decoration: underline;
+}
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3) {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.3;
+}
+.md-body :deep(h3) { font-size: 1.05em; }
+.md-body :deep(hr) {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}
+</style>

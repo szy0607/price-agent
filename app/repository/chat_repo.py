@@ -5,48 +5,135 @@ from app.core.errors import BizError, ErrorCode
 from app.models import ChatMessage, CartItem, OwnedItem
 from app.schemas.chat_sche import ItemRefInSchema
 
+# 生成结局三态。status 列见 docs/流式输出-设计.md §1。
+STATUS_COMPLETED = "completed"
+STATUS_INTERRUPTED = "interrupted"
+STATUS_FAILED = "failed"
 
-async def add_message(user_id:int,conversation_id:int,role:str,content:str,session:AsyncSession,*,model:str|None=None) -> ChatMessage:
+# A6 画像看到的「用户中断」事件占位——只说发生了中断，不给那段被否决的半截文本。
+# 为什么画像要留这个事件、上下文却要整条排除：用户按下停止是他明确否决方向，
+# 但「主动喊停」本身是「不是这个方向 / 说太长 / 问错了」的高价值信号，值得进长期画像。
+_INTERRUPT_EVENT = "（用户中断了上一轮回答）"
+
+
+async def add_message(
+        user_id: int,
+        conversation_id: int,
+        role: str,
+        content: str,
+        session: AsyncSession,
+        *,
+        model: str | None = None,
+        status: str = STATUS_COMPLETED) -> ChatMessage:
     message = ChatMessage(
         user_id=user_id,
         conversation_id=conversation_id,
         role=role,
         content=content,
         model=model,
+        status=status,
     )
     session.add(message)
     await session.commit()
     await session.refresh(message)
     return message
-async def recent_messages(user_id:int,conversation_id:int,limit:int,session:AsyncSession) -> list[ChatMessage]:
+
+
+async def _fetch_rows(
+        user_id: int,
+        conversation_id: int,
+        limit: int,
+        session: AsyncSession,
+        *,
+        desc: bool) -> list[ChatMessage]:
+    """按 (user_id, conversation_id) 取消息。desc=True 供倒序取最近 N 条（拼上下文用）。"""
+    order = ChatMessage.id.desc() if desc else ChatMessage.id.asc()
     result = await session.scalars(
         select(ChatMessage)
-        .where(ChatMessage.user_id == user_id,ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.id.desc())
-        .limit(limit)
-    )
-    return list(result.all())[::-1]
-
-def trim_trailing_users(messages:list[ChatMessage]) -> list[ChatMessage]:
-    """由于采用user信息先落库，如果出现模型调用失败，会导致连续两次user信息，部分模型不支持连续两次user信息"""
-    end = len(messages)
-    while end > 0 and messages[end-1].role == "user":
-        end -= 1
-    return messages[:end]
-async def list_messages(user_id:int,conversation_id:int,limit:int,session:AsyncSession) -> list[ChatMessage]:
-    """某个会话的全部历史，按 id 升序（前端直接顺序渲染）。
-
-    与 recent_messages 的分工：那个给模型拼上下文用，倒序取最近 N 条再翻回来；
-    这个给用户看历史用，正序取最多 limit 条。user_id 同时在 WHERE 里，
-    归属不通过的会话根本查不到行。
-    """
-    result = await session.scalars(
-        select(ChatMessage)
-        .where(ChatMessage.user_id == user_id,ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.id.asc())
+        .where(ChatMessage.user_id == user_id, ChatMessage.conversation_id == conversation_id)
+        .order_by(order)
         .limit(limit)
     )
     return list(result.all())
+
+
+async def messages_for_context(
+        user_id: int,
+        conversation_id: int,
+        limit: int,
+        session: AsyncSession) -> list[dict]:
+    """给模型拼上下文的对话序列。**只认completed**。
+
+    interrupted / failed 一律排除，理由（docs/流式输出-设计.md §0）：
+    用户按下停止是他明确否决了这个方向，把半截话塞回去，模型下一轮会顺着
+    用户已放弃的内容继续答；failed 的半截同理。
+
+    返回 list[dict] 而非 ORM 实体：调用方会在本函数返回后关闭 session，
+    detached 实例再取属性会踩 DetachedInstanceError。
+    """
+    rows = await _fetch_rows(user_id, conversation_id, limit, session, desc=True)
+    return [
+        {"role": row.role, "content": row.content, "model": row.model}
+        for row in reversed(rows)
+        if row.status == STATUS_COMPLETED
+    ]
+
+
+async def messages_for_profile(
+        user_id: int,
+        conversation_id: int,
+        limit: int,
+        session: AsyncSession) -> list[dict]:
+    """给 A6 画像的近期对话。与 messages_for_context **故意用不同规则**。
+
+    - completed   ：原样进
+    - interrupted ：**只留事件占位**，半截文本绝不进（否则画像会从用户已否决的文本里提炼偏好）
+    - failed      ：整条排除。半截的助手自述不是用户表达，进画像等于凭空造偏好
+
+    limit 按「取到的原始行数」算，不是过滤后的条数——否则半截消息会挤占 completed 的名额。
+    """
+    rows = await _fetch_rows(user_id, conversation_id, limit, session, desc=True)
+    out: list[dict] = []
+    for row in reversed(rows):
+        if row.status == STATUS_INTERRUPTED:
+            out.append({"role": row.role, "content": _INTERRUPT_EVENT, "model": row.model})
+        elif row.status == STATUS_COMPLETED:
+            out.append({"role": row.role, "content": row.content, "model": row.model})
+        # failed：整条跳过
+    return out
+
+
+def trim_trailing_users(messages: list[dict]) -> list[dict]:
+    """砍掉尾部连续的 user 消息。
+
+    「user 先入库 + 模型失败」的必然产物：失败时库里只有 user 没有 assistant，
+    尾部就出现连续两条 user，部分模型不接受这种序列。
+
+    ⚠️ 有效性依赖 messages_for_context **先过滤掉非 completed**：否则 failed /
+    interrupted 的 assistant 插在序列中间会把user/user 连在一起打断，砍尾巴也砍不干净。
+    这条隐式契约有回归测试锁住（docs/流式输出-设计.md §4.4）。
+    """
+    end = len(messages)
+    while end > 0 and messages[end - 1]["role"] == "user":
+        end -= 1
+    return messages[:end]
+
+
+async def list_messages(
+        user_id: int,
+        conversation_id: int,
+        limit: int,
+        session: AsyncSession) -> list[ChatMessage]:
+    """某个会话的全部历史，按 id 升序（前端直接顺序渲染）。
+
+    与 messages_for_context / messages_for_profile 的分工：那两个决定
+    「哪些内容值得再交给模型」，本函数负责「忠实记录发生过什么」——
+    completed / interrupted / failed **全部返回**，前端据此显示状态角标。
+    （docs/流式输出-设计.md §0：三条出口故意用不同规则）
+
+    user_id 同时在 WHERE 里，归属不通过的会话根本查不到行。
+    """
+    return await _fetch_rows(user_id, conversation_id, limit, session, desc=False)
 async def fetch_items_for_refs(
         user_id: int, refs: list[ItemRefInSchema],
         session: AsyncSession) -> list[tuple[str, int, str, dict]]:
