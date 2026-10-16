@@ -14,3 +14,4 @@ pytest-asyncio>=0.23
 # httpx：0.27 起 ASGI 测试必须用 httpx.ASGITransport(app=app)，
 #   不能再像旧版那样给 AsyncClient 直接传 app=（已移除）
 httpx>=0.27
+

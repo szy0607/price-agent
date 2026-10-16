@@ -15,4 +15,7 @@ class Settings(BaseSettings):
     bocha_api_key : str|None = None
     api_key_kek : str|None = None
     pg_url : str|None = None
+    redis_url : str
+    # 索引过期时间（秒）
+    index_stale_seconds: int = 600
 settings = Settings()

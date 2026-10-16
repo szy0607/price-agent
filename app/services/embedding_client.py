@@ -19,12 +19,12 @@ async def embed_texts(user_id:int,texts:list[str],session:AsyncSession)->list[li
     headers = {"Authorization": f"Bearer {record.api_key}",
                "Content-Type": "application/json"}
     vector: list[list[float]] = []
-    for start in range(0, len(texts), 10):
-        batch = texts[start:start+10]
+    for start in range(0, len(texts), _BATCH_SIZE):
+        batch = texts[start:start+_BATCH_SIZE]
         payload = {
             "model": record.model_name,
             "input": batch,
-            "dimension": 1024
+            "dimension": _EMBEDDING_DIM
         }
         client = get_http_client()
         if client is None:
