@@ -11,6 +11,22 @@ _TIMEOUT = httpx.Timeout(20.0, connect=8.0)
 class EmbeddingError(Exception):
     """embedding 错误"""
 
+class EmbeddingKeyRejected(EmbeddingError):
+    """向量模型的 key 已被厂商拒绝，已标记为失效，请重新配置"""
+
+class EmbeddingCallFailed(EmbeddingError):
+    """调用失败（非200，或响应体不是合法 JSON）——**可重试**。
+
+    含 402 欠费、网关 502/503、网络抖动这类短暂故障。
+    """
+
+class EmbeddingDimMismatch(EmbeddingError):
+    """返回向量维度与 _EMBEDDING_DIM 不符——**不可重试**，属配置错误。
+
+    重试到天荒地老也是同一个结果：模型给的根本不是 1024 维。
+    """
+
+
 async def embed_texts(user_id:int,texts:list[str],session:AsyncSession)->list[list[float]]:
     if not texts:
         return []
@@ -35,13 +51,16 @@ async def embed_texts(user_id:int,texts:list[str],session:AsyncSession)->list[li
             resp = await client.post(url, json=payload, headers=headers)
         if resp.status_code in (401, 403):
             await embedding_key_service.mark_invalid(record.key_id,user_id,session)
-            raise EmbeddingError("向量模型的 key 已被厂商拒绝，已标记为失效，请重新配置")
+            raise EmbeddingKeyRejected()
         if resp.status_code != 200:
-            raise EmbeddingError("向量模型调用失败")
-        data = resp.json()
-        batch_vector = [row["embedding"] for row in data["data"]]
+            raise EmbeddingCallFailed("向量模型调用失败")
+        try:
+            data = resp.json()
+            batch_vector = [row["embedding"] for row in data["data"]]
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            raise EmbeddingCallFailed("向量模型返回了无法解析的内容") from exc
         for vec in batch_vector:
             if len(vec) != _EMBEDDING_DIM:
-                raise EmbeddingError("向量模型返回的向量维度与配置不一致")
+                raise EmbeddingDimMismatch("向量模型返回的向量维度与配置不一致")
         vector.extend(batch_vector)
     return vector

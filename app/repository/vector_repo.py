@@ -75,7 +75,7 @@ _SEARCH_SQL = text(
            source_id,
            1 - (vector <=> CAST(:vec AS vector)) AS score
     FROM item_embedding
-    WHERE user_id = :uid
+    WHERE user_id = :uid AND 1 - (vector <=> CAST(:vec AS vector)) >= :min_score
     ORDER BY vector <=> CAST(:vec AS vector)
     LIMIT :k
     """
@@ -128,23 +128,43 @@ async def delete_by_source(user_id: int, source_type: str, source_id: int) -> No
     await _pg_tx(_run)
 
 async def search_similar(
-    user_id: int, query_vector: list[float], top_k: int = _DEFAULT_TOP_K
+    user_id: int, query_vector: list[float], top_k: int = _DEFAULT_TOP_K, min_score: float = 0.0
 ) -> list[ItemHit]:
     """语义检索：找出这个用户最相似的 k 条，返回 (类型, id, 相似度)。
 
     相似度 = 1 - 余弦距离，所以越大越像（1.0 = 同方向）。
     ORDER BY 用的是距离本身（越小越靠前），别用 score 排，方向反了。
 
+    min_score 是相似度下限，**由调用方传项目配置**（settings.rag_min_score）
+    进来，repo 层不知道经验值——换 embedding 模型时分数分布会变，那个数得能
+    在不碰 repo 的前提下调整。默认 0.0 = 不过滤，保持向后兼容。
+    ⚠️ 阈值不是可有可无的：库里只有 1 条向量时，top_k 形同虚设——任何 query
+    都会「有命中」，0.19 分的垃圾照样被召回并拼进 prompt（2026-10-17 实测）。
+
     刻意不建 hnsw 向量索引：每人的向量就几百条，暴力扫比走索引快，
     十万量级再加。user_id 必在 WHERE 里 —— 一来是铁律，二来是先把
     无关行过滤掉再算距离。
+
+    ⚠️ WHERE 里的 `1 - (vector <=> ...)` 和 ORDER BY 算的是同一个距离，
+    所以「先过滤再 LIMIT」与「先 LIMIT 再过滤」结果一样、代价一样。
     """
     if top_k < 1:
         raise ValueError("top_k 至少为 1")
+    if min_score < 0.0 or min_score > 1.0:
+        raise ValueError("min_score 必须在 0-1 之间")
 
     async def _run(session: AsyncSession) -> list[ItemHit]:
         result = await session.execute(
-            _SEARCH_SQL, {"uid": user_id, "vec": _vec_literal(query_vector), "k": top_k}
+            _SEARCH_SQL,
+            {
+                "uid": user_id,
+                "vec": _vec_literal(query_vector),
+                "k": top_k,
+                # 🔴 漏了这个键会抛
+                #    InvalidRequestError: A value is required for bind parameter 'min_score'
+                # —— SQL 里有 :min_score 而参数字典里没有，asyncpg 到执行时才报。
+                "min_score": min_score,
+            },
         )
         # text() 没声明列名，行只能按下标取（row.source_type 会 AttributeError）
         return [ItemHit(row[0], int(row[1]), float(row[2])) for row in result.all()]

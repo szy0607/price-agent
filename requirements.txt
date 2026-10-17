@@ -1,6 +1,7 @@
 # ============================================================
 # price-agent 后端依赖（运行必需）
-# 更新：2026-09-16 ｜ 依据：docs/用户注册与登录-接口契约.md §5
+# 更新：2026-10-17 ｜ 依据：docs/用户注册与登录-接口契约.md §5
+#      （2026-10-17 补arq + 补 asyncpg 注释 + 清掉 redis 重复项）
 #
 # 用法：**本项目的运行环境是 conda 的 `fast`**（E:\conda\envs\fast，Python 3.10.20），
 #       不是项目里的 `.venv`。激活后在项目根直接跑即可：
@@ -13,8 +14,13 @@
 #
 # 约定：本文件只写「顶层依赖 + 范围约束」，不写死精确版本；
 #      需要精确复现时用 requirements.lock.txt（或 uv lock）锁定。
-#      ⚠️ 已知缺口（2026-09-21 登记）：`fast` 里实际装有 langgraph / langchain /
-#        langchain-deepseek / langchain-openai（M1 起要用），但本文件**尚未列**——等真正用到再补。
+#
+# 📌 **LangGraph 一族仍未列入（2026-10-17 复核）**：
+#   `fast` 环境里实际装有 langgraph 1.2.4 / langchain 1.3.4，
+#   但**全项目零引用**（`grep -rn "langgraph|StateGraph" app/` 无命中），
+#   `app/agents/` 目录也不存在——5 个 Agent 全部是规划编号，没有一个是代码实体。
+#   **依赖没有跟上代码，该修的是代码而不是依赖**。等真要接入编排时再补这里，
+#   届时一并删掉本段。
 # ============================================================
 
 # ---------- Web 框架 ----------
@@ -40,10 +46,21 @@ greenlet>=3.1
 # alembic：必须 1.11+。1.10 及以下不支持 SQLAlchemy 2.0（迁移会直接报错）
 alembic>=1.13
 
-# ---------- 可选缓存 / 临时状态（M3/M6 才启用）----------
-# redis：用官方 redis.asyncio（异步）。M0-M2 本地开发不要求 Redis 服务。
-# 别用已废弃的 aioredis（独立包，勿装）
+# ---------- 任务队列 / 缓存（2026-10-16 RAG 索引任务链路，运行必需）----------
+# redis：用官方 redis.asyncio（异步）。**别用已废弃的 aioredis**（独立包，勿装）。
+#   ⚠️ 用途已变：原先标注「M0-M2 不要求 Redis 服务」，现在 Redis 是
+#   **arq 任务队列的唯一通道**，缺了它 worker 完全跑不起来（设计见
+#   docs/RAG索引任务-设计.md）。Redis 服务需常驻。
 redis>=5.0
+# arq：异步任务队列。**选它而不是 RQ 的唯一理由是「异步原生」**——
+#   arq 的 worker 任务函数是 async def，与本项目全异步栈（SQLAlchemy 2.x 异步 +
+#   aiomysql/asyncpg + httpx.AsyncClient）同构；RQ 的 worker 是同步的，要用
+#   asyncio.run()包一层、每次建销事件循环、AsyncClient 无法跨任务复用。
+#   用法：arq app.worker.WorkerSettings（见 docs/启动命令.md §6）
+#   ⚠️ arq 作者已声明该项目 **maintenance only**（仅修 bug，无新功能）。功能上够用；
+#      将来若需要任务优先级/结果面板，得换库——但迁移成本低（任务函数是普通
+#      async def，只改 WorkerSettings 与投递那几行）。
+arq>=0.28
 # Pillow：本轮（第 2 轮）就需要 —— 人机验证已定为自研图形码，验证码图片由 Pillow 生成。
 #   改用腾讯验证码/极验这类外部服务才不需要它。
 Pillow>=10.3
@@ -58,5 +75,8 @@ pydantic-settings>=2.2
 email-validator>=2.1
 # bcrypt：直接用，别配 passlib。passlib 1.7.4 读不到 bcrypt 4.x 的 __about__，会告警甚至报错
 bcrypt>=4.1
+
+# ---------- PostgreSQL（PG 16 + pgvector 作向量库）----------
+# asyncpg：PG 的异步驱动，PG_URL 用 postgresql+asyncpg://
+#   ⚠️ 它的连接串 scheme 是 **postgresql+asyncpg**，不是 mysql+aiomysql 那种写法
 asyncpg>=0.29
-redis>=5.0

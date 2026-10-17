@@ -18,4 +18,6 @@ class Settings(BaseSettings):
     redis_url : str
     # 索引过期时间（秒）
     index_stale_seconds: int = 600
+    rag_top_k: int = 5
+    rag_min_score: float = 0.4
 settings = Settings()

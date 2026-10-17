@@ -14,6 +14,7 @@ from app.core.errors import BizError, ErrorCode, success
 from app.database.session import async_session_local
 from app.dependence import CurrentUser, get_current_session, require_same_origin_write
 from app.models import PurchaseRecord
+from app.services import index_service
 from app.services.product_page import PageFetchError, fetch_product_draft
 
 purchase_router = APIRouter(prefix="/purchase-records", tags=["purchase-records"])
@@ -153,6 +154,11 @@ async def create_record(payload: RecordInput, user: CurrentUser):
             db.add(row)
             await db.flush()
             await db.refresh(row)
+    # 🔴 投递必须在事务块【之外】（设计文档 §3）：Redis 里没有「跟着 MySQL 事务
+    # 回滚」的机制。放里面会出现两种坏结果——worker 处理一个不存在的 id；
+    # 或 Redis 投递失败把事务拖回滚，用户数据丢了。
+    # index_status 靠 DB server_default 填 PENDING，与本行同一次 commit。
+    await index_service.enqueue_sync(user.id, "purchase", row.id)
     return success(_row_dict(row))
 
 
@@ -181,6 +187,8 @@ async def update_record(record_id: int, payload: RecordInput, user: CurrentUser)
                 setattr(row, key, value)
             await db.flush()
             await db.refresh(row)
+    # 商品名/规格/备注变了 → 切片文本变了 → 必须重新索引（同 create 的投递口径）
+    await index_service.enqueue_sync(user.id, "purchase", record_id)
     return success(_row_dict(row))
 
 
@@ -190,6 +198,9 @@ async def delete_record(record_id: int, user: CurrentUser):
         async with db.begin():
             row = await _owned_for_update(db, record_id, user.id)
             await db.delete(row)
+    # 删向量副本，不投递：删除是毫秒级操作，进队列会留一段时间的脏数据。
+    # drop_vector 自吞异常——PG 不可用不能把「已删成功」报成失败。
+    await index_service.drop_vector(user.id, "purchase", record_id)
     return success({"id": record_id})
 
 

@@ -201,26 +201,112 @@ async def sync_one(ctx: dict, user_id: int, source_type: str, item_id: int) -> N
 | arq `job_timeout` | **60 秒** | 需 > 20，否则任务被 arq 砍掉但模型调用还在跑 |
 | reaper 判 RUNNING 僵死 | 建议 **10 分钟** | 依据：20 秒 × 30 倍（沿用 00:36 的推算） |
 
-### 4.6 失败处理：抛 Retry，不吞
+### 4.6 🔴 失败处理：**按可重试性分流**，不是一律抛 Retry
+
+> 2026-10-17 大宋拍板改为异常类型分流。下文「原方案（错误）」保留，是为了说明
+> 为什么不能一律重试——那段是真会发生的坑，不是假设。
+
+#### 四种错误，两种可重试性
+
+`embedding_client` 的错误**不是同质的**，全走 `raise Retry` 是错的：
+
+| 异常类型 | 触发 | 可重试 | 依据 |
+|---|---|---|---|
+| `EmbeddingKeyRejected` | 401/403 | ❌ | 本函数已 `mark_invalid`，key 已死，重试只是重复撞同一堵墙 |
+| `EmbeddingDimMismatch` | 向量长度 ≠ 1024 | ❌ | 配置错，改配置才能好，重试到天荒地老同一结果 |
+| `EmbeddingCallFailed` | 非 200（含 402 欠费/网关 5xx）、**响应体解析失败** | ✅ | 短暂故障，退避后可能成功 |
+| （`EmbeddingError` 基类） | — | — | 保持向后兼容 |
+
+**分流代码**：
 
 ```python
-if 失败:
-    raise Retry(defer=...)      # 让 arq 退避重试
-# arq 重试用尽（max_tries=3）后：
-#任务标记为 failed，业务表状态仍是 RUNNING → reaper 捞（§6）
+    async with async_session_local() as session:
+        try:
+            vectors = await embedding_client.embed_texts(user_id, [text], session)
+        except (embedding_client.EmbeddingKeyRejected,
+                embedding_client.EmbeddingDimMismatch) as exc:
+            # 不可重试 → 立即置 FAILED。FAILED 在 reap_once 的捞取范围内（§6.1），
+            # key 修好/配置改好后仍能被重新捞起，不会永久失联。
+            logger.warning("embedding 不可重试，置 FAILED %s:%s:%s —— %s",
+                           source_type, item_id, user_id, exc)
+            async with async_session_local() as s2:
+                await set_failed(user_id, source_type, item_id, s2)
+                await s2.commit()
+            return
+        except embedding_client.EmbeddingCallFailed as exc:
+            # 可重试 → 抛 Retry 让 arq 退避 5/10/15 秒。
+            # ⚠️ arq 重试用尽**不会**改业务表状态，停在 RUNNING 等 reaper 超时自愈。
+            logger.warning("embedding 可重试失败，交 arq %s:%s:%s —— %s",
+                           source_type, item_id, user_id, exc)
+            raise Retry(defer=ctx.get("job_try", 1) * 5) from exc
 ```
 
-**⚠️ 注意**：arq 重试用尽**不会**自动把业务表置FAILED。所以有两条兜底路径：
-- arq 自身重试（快，秒级）
-- reaper 扫 `RUNNING` 超时（慢，分钟级）
+#### 为什么不能一律抛 Retry（**原方案错在哪**）
 
-**这两条不冲突**，reaper 是最终正确性保证。
+```python
+# ❌ 原方案：任何失败都重试
+except EmbeddingError:
+    raise Retry(defer=...)
+```
 
-**「置 FAILED 后也要能被捞」**：`FAILED` 必须在 reaper 的捞取范围里（§6.1）—— 否则一次失败就永久失联。
+三个具体后果：
+
+1. **白烧额度**：key 已死 / 维度配置错时，重试 3 次（`max_tries=3`）得到的都是同一个错
+2. **状态滞后**：arq 重试用尽**不会**改业务表，状态停在 `RUNNING`，要等 reaper 判超时（`index_stale_seconds`，10 分钟）才自愈。而直接置 FAILED 是**立即可观测**的——查库就知道这件商品索引失败，不会「明明失败却查不出原因」
+3. **排序挤占**：`max_tries` 是**每个任务**的额度，不可重试的任务把它烧完就走，不影响别的任务；但同一批次的其他任务如果也在重试队列里排队，整体延迟被拉长
+
+#### 🔴 响应体解析失败必须归一化（**第四种情况，原方案漏了**）
+
+`embedding_client.py` 原本这样解析响应：
+
+```python
+data = resp.json()                          # ← 厂商返回 HTML 错误页时抛 JSONDecodeError
+batch_vector = [row["embedding"] for row in data["data"]]   # ← 结构不对时抛 KeyError/TypeError
+```
+
+**这两行抛的不是 `EmbeddingError`**，会被调用方的 `except EmbeddingError` 漏掉，
+变成「未知错误」：**arq 既不重试也不改业务表状态**，只能等 reaper 超时。
+
+**改法**：
+
+```python
+try:
+    data = resp.json()
+    batch_vector = [row["embedding"] for row in data["data"]]
+except (ValueError, KeyError, TypeError, IndexError) as exc:
+    # 归一化成 EmbeddingCallFailed（可重试）——网关返回 HTML 错误页是可重试的
+    raise EmbeddingCallFailed("向量模型返回了无法解析的内容") from exc
+```
+
+同理，维度校验要挡非 list：
+
+```python
+if not isinstance(vec, list) or len(vec) != _EMBEDDING_DIM:
+    raise EmbeddingDimMismatch("向量模型返回的向量维度与配置不一致")
+```
+
+#### 为什么用异常类型而不是匹配文案
+
+**踩过的坑**：`EmbeddingKeyRejected` 之前是靠 `"key 已被厂商拒绝" in str(exc)` 匹配的。
+文案一改，判断静默变False → 不可重试的错误被当成可重试 → **白烧三次重试，不报错**。
+
+异常类型是**编译期保证**的，改文案不影响分类。
+
+**向后兼容**：三个子类都继承 `EmbeddingError`，所以现有 `except EmbeddingError`
+的调用方行为不变（B 批 `embedding_client.py` 目前零引用，但这个兼容性要保住）。
+
+#### 两条兜底路径不冲突
+
+| 路径 | 时机 | 覆盖什么 |
+|---|---|---|
+| arq 自身重试 | 秒级 | 可重试错误的快速恢复 |
+| reaper 扫 `RUNNING` 超时 | 分钟级 | 一切漏网（含 worker 崩溃、arq 用尽、Redis 投递失败） |
+
+**reaper 是最终正确性保证**。
 
 ---
 
-## 5. 商品CRUD 的接线：8 个入口，一个都不能漏
+## 5. 商品 CRUD 的接线：10 个入口，一个都不能漏
 
 ### 5.1 完整入口清单（实测扫描结果）
 
@@ -272,14 +358,36 @@ router 收到请求
 
 或者更省事：**在 repo 函数里 commit 之后直接调**，但要把enqueue 的异常全吞（投递失败不能影响已提交的数据）。**两种都行，大宋选。**
 
-### 5.3 🔴 转移（transfer）是特例，两张表都要处理
+### 5.3 🔴 转移（transfer）是特例：**三张表**都要处理
 
-`transfer_to_owned_item`（`cart_repo.py:61`）把购物车商品变成物品库商品。**它同时影响两处**：
+> 2026-10-17 修正：本节原写「两张表」，是**漏看了 `cart_repo.py:77-81`**
+> —— `transfer_to_owned_item` 还会同时创建一条 `PurchaseRecord`。
 
-- 旧 cart 行被删 → **删掉它的向量副本**
-- 新 owned 行产生 → **新行 PENDING + 投递**
+`transfer_to_owned_item`（`cart_repo.py:61-90`）把购物车商品变成物品库商品。
+**它同时动三处**：
 
-**漏任一边**：要么 PG 里留一条指向已删商品的孤儿向量（检索命中后回 MySQL 查不到 → 检索结果里出现空条目），要么新物品永远不索引。
+```python
+owned_item = OwnedItem(...)      # :72  新建 owned 行
+record = PurchaseRecord(...)# :77  🔴 同时新建一条消费记录
+session.add_all([owned_item, record])
+await session.flush()        # :83
+await session.delete(item_in_cart)    # :84  删旧 cart 行
+```
+
+所以接线要三件事：
+
+| 动作 | 为什么 |
+|---|---|
+| 删 cart 侧向量副本 | 旧 cart 行没了，PG 里留着的向量成了孤儿 |
+| owned 新行投递 | 新物品要能被检索到 |
+| 🔴 **purchase 新行投递** | `PurchaseRecord` 是第三个可检索来源（`SOURCE_TYPES` 里有 `purchase`），不投递的话这张表在 RAG 里**永远是空的** |
+
+**漏任一边**：要么 PG 里留孤儿向量（检索命中后回 MySQL 查不到 → 结果里出现空条目），
+要么新物品永远不索引，要么消费记录这条检索线完全空转。
+
+**实现前提**：`transfer_to_owned_item` 目前只 `return owned_item`（:90），
+**拿不到 `record.id`**。需要它改成返回 `(owned_item, record)`。
+**保持 repo 不碰 Redis**——投递仍在 router 层做。
 
 ### 5.4 删除：删向量副本，不只是删行
 
@@ -391,22 +499,97 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 ```
 ——**写「索引处理中」而不是静默省略**。静默省略会让模型以为这件商品不存在。
 
+### 8.1 检索位置的拍板：固定前置，**不做模型自主判断**
+
+> 2026-10-17 大宋拍板：**先跑通固定检索，工具化押后。**
+
+**大宋原本想的是「封装成工具，让模型自己判断要不要检索」（与 Yuxi 同设计）。
+我给了成本对比，他决定先用固定前置。** 账留着，将来重议时直接翻到这里：
+
+```
+用户："送人送什么好"
+
+【固定前置 —— 本设计采用】
+  检索 366ms → 模型生成 3s
+  总计约 3.4 秒（不管该不该检索都一样）
+
+【工具化 —— 模型生成 tool_call 决定调不调】
+  第1轮模型决定（1.5s）
+    ├─ 要调 → 执行工具 366ms → 第2轮模型 3s = 约 4.9 秒
+    └─ 不调 → 直接答 1.5 秒
+```
+
+| 场景 | 固定前置 | 工具化 | 差 |
+|---|---|---|---|
+| 需要检索（认真问商品，**多数**） | 3.4s | 4.9s | 🔴 **慢 1.5 秒** |
+| 不需要检索（你好 / 谢谢，**少数**） | 3.4s | 1.5s | 🟢 快 1.9 秒 |
+
+**「让模型决定要不要检索」本身要花约 1.5 秒，而它省下的检索只有 0.366 秒——
+这笔账是亏的，亏约 4 倍。**
+
+**检索耗时实测（2026-10-17 实测，千问 qwen3.7-text-embedding-flash）**：
+
+| 步骤 | 耗时 | 占比 |
+|---|---|---|
+| ① 调 embedding 拿查询向量 | **335 ms** | **91%** |
+| ② PG 向量检索 | 31 ms | 8% |
+| ③ 回 MySQL 取原文 | ~5 ms | 1% |
+| **合计** | **366 ms** | |
+
+**所以优化方向也随之明确：要优化就优化 embedding 调用（占 91%），不是改编排结构。**
+
+### 8.2 什么时候该重议这个决定
+
+| 信号 | 意味着该换工具化 |
+|---|---|
+| 语料涨到几千件，`top_k=5` 装不下 prompt | 该让模型自己挑 |
+| **首字延迟被真实用户抱怨**（不是我们推测的慢） | 换结构 |
+| 需要展示「子agent 正在被调用」这类过程 | 工具化的附带收益，值得付那 1.5 秒 |
+
+**这三条出现之前，固定前置是对的。**
+
+### 8.3 🔴 但「对话里的商品卡片」会推着走向工具化
+
+卡片是**另一个**功能（`docs/Agent编号约定.md` §5、§6），它需要「模型判断该不该弹卡片」
+——这与「模型判断该不该检索」是**同一类需求**。
+
+卡片一旦要做，多轮编排就绕不开（判断 → 可能查参数 → 渲染 → 确认入库），
+**届时 LangGraph 也就必须上**（项目现状：`langgraph` 已安装但全项目零引用）。两种顺序：
+
+| 顺序 | 步骤 | 适合 |
+|---|---|---|
+| **本设计采用** | 先固定检索跑通 → 再定要不要工具化 | 想先看到效果 |
+| 另一种 | 卡片 + 检索一起上工具化 | 想一次做完 |
+
+**大宋 2026-10-17 选了前者。**
+
 ---
 
 ## 9. 施工顺序
 
-| # | 内容 | 产出 |
-|---|---|---|
-| 1 | 三张表加 `index_status` / `index_time` + 迁移 | autogenerate 后**逐行读**，查 server_default |
-| 2 | `app/services/index_service.py`：状态读写 + `enqueue_sync` | lazy Redis 单例 |
-| 3 | `app/worker.py`：WorkerSettings + `on_startup` 起 PG | 🔴 漏这行全程失败 |
-| 4 | `sync_one` 三态落库 | 🔴 PG 成功才 SYNCED |
-| 5 | 8 个 CRUD 入口接线（含 transfer 双表、删除清副本） | 最容易漏的一步 |
-| 6 | `app/worker_reaper.py`：每 5 分钟扫 | 独立进程 |
-| 7 | `rag_service.py` + `chat_service` 接线（读取侧） | §8 契约 |
-| 8 | 启动文档补两条命令 | `arq app.worker.WorkerSettings` / `python -m app.worker_reaper` |
+> **2026-10-17 17:10 更新**（大宋跑起来了，进度大幅前移）：
+> 第 1–8 步**全部完成**，端到端实测通过（千问 embedding 真调通，1024 维写入 PG，
+> `owned_item` 状态 SYNCED + `index_time` 有值；reaper dry-run 精确捞到 67 条）。
+> 当前在**第 9 步：读取侧**。
+>
+> 已知遗留：`index_service.py` 有两处未使用的 import（第 15 行的 `datetime`、
+> 第 44 行函数体内的重复 import），不影响运行。
 
-**第 1、3、4、5 步各有一个「不报错但静默坏」的坑**，见 §11 自查清单。
+| # | 内容 | 状态 | 产出 /备注 |
+|---|---|---|---|
+| 1 | 三张表加 `index_status` / `index_time` + 迁移 | ✅ | `49a0c3b7f694`；autogenerate 正确生成了 server_default；67 行存量全回填 PENDING |
+| 2 | `config.py` 加 `redis_url` / `index_stale_seconds` + `app/core/redis_client.py` | ✅ | 🔴 `redis_url` 不给默认值（§14） |
+| 2.5 | `embedding_client.py` 四个异常类（可重试性分流） | ✅ | 见 §4.6 |
+| 3 | `app/services/index_service.py`：状态读写 + `enqueue_sync` + `reap_once` | ✅ |含 `drop_vector`（自吞异常） |
+| 4 | `app/worker.py`：WorkerSettings + `on_startup` 起 PG | ✅ | 🔴 `functions`（单数会静默失效）/ `max_tries`（不是 RQ 的 `max_retries`） |
+| 5 | `sync_one` 五步 + 按异常类型分流 | ✅ | 🔴 PG 成功才 SYNCED |
+| 6 | **10 个** CRUD 入口接线（含 transfer **三表**、删除清副本） | ✅ | 最容易漏的一步，已全接 |
+| 7 | `app/worker_reaper.py`：每 5 分钟扫 | ✅ | 实测精确捞到 67 条 |
+| 8 | `main.py` lifespan 补 `close_pool()` | ✅ | — |
+| 9 | `rag_service.py` + `chat_service.prepare_chat` 接线（读取侧） | 🔵 **进行中** | §8 契约；**固定前置，不做模型自主判断**（§8.1） |
+| 10 | 启动文档补两条命令 | ✅ | `docs/启动命令.md` §6 已补，含「跑测试前先清队列」警告 |
+
+**第 2、4、5、6 步各有一个「不报错但静默坏」的坑**，见 §11 自查清单。
 
 ---
 
@@ -419,9 +602,15 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 | 3 | PG 写失败 | 状态**不是** SYNCED；arq 重试用尽后 reaper 能捞到 |
 | 4 | 🔴 **顺序约束** | **注入 PG 写失败 → 断言状态绝非 SYNCED**（这条锁死 §4.4 地基） |
 | 5 | worker 崩溃 | RUNNING 超 10 分钟被 reaper 捞起并转 SYNCED |
-| 6 | 🔴 **transfer 双表** | cart 侧向量副本被删 + owned 侧新行被索引 |
+| 6 | 🔴 **transfer 三表** | cart 副本被删 + owned 新行被索引 + **purchase 新行也被索引** |
 | 7 | 删除清副本 | 删商品后 `search_similar` 命中不到它 |
 | 8 | RAG 状态提示 | PENDING 商品在 prompt 里带「索引处理中」，**且请求不失败** |
+| 9 | 🔴 **不可重试不烧额度** | 抛 `EmbeddingKeyRejected` → **arq 重试次数为 0** 且状态直接 FAILED |
+| 10 | 🔴 **可重试才退避** | 抛 `EmbeddingCallFailed` → `Retry(defer=5/10/15)` |
+| 11 | 🔴 **响应体异常被归一化** | 厂商返回 HTML 错误页 → 抛 `EmbeddingCallFailed`，**不是裸 `JSONDecodeError`** |
+| 12 | 异常子类兼容 | `except EmbeddingError` 仍能捕到三个子类（B 批调用方不受影响） |
+
+第 9、11 条对应 §4.6 的两个修正——**没有这两条测试，分类逻辑退化不会有人发现**。
 
 第 4、6 条最重要：**第 4 条锁死你定的地基约束，第 6 条是唯一会「两处只做一处」的转移逻辑。**
 
@@ -436,14 +625,21 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 - [ ] 🔴 Redis 投递在 **commit 之后**，且**投递失败不回滚**
 - [ ] 🔴 `sync_one` 里 **PG 写入成功后才置 SYNCED**（顺序不能反）
 - [ ] 🔴 `app/worker.py` 的 `on_startup` 调了 `start_pg_engine()`（独立进程不跑 lifespan）
-- [ ] 🔴 `transfer_to_owned_item` **两边都处理**（删 cart 副本 + 建 owned 索引）
+- [ ] 🔴 `transfer_to_owned_item` **三处都处理**（删 cart 副本 + 建 owned 索引 + **建 purchase 索引**，§5.3）
 - [ ] 🔴 三个 `delete_*` 都调了 `vector_repo.delete_by_source`（否则留孤儿向量）
+- [ ] 🔴 **按异常类型分流**，不是一律 `raise Retry`（`KeyRejected`/`DimMismatch` 直接 FAILED，§4.6）
+- [ ] 🔴 `embedding_client` 的**响应体解析已包 try**（厂商返 HTML 错误页时抛的是裸 `JSONDecodeError`，会被漏掉）
+- [ ] 🔴 **没有靠文案匹配**判断可重试性（改文案会让分类静默失效）
+- [ ] 🔴 `redis_url` **不给默认值**，强制从 `.env` 来（§14）
+- [ ] `.env.example` 补了 `PG_URL` 与 `REDIS_URL`（该模板进 Git，协作者靠它配环境）
+- [ ] `arq_redis_settings` 在 `app/core/redis_client.py`，**不在 `config.py`**（那里是纯声明）
+- [ ] `main.py` 的 lifespan `finally` 调了 `close_pool()`
 - [ ] arq `job_timeout` **大于** embedding 的 20 秒 HTTP timeout
 - [ ] reaper 捞取范围**包含 FAILED**（否则一次失败永久失联）
 - [ ] reaper 里**每轮开新 session**，不长期持有
-- [ ] `enqueue_sync` 的 Redis 连接池是**单例复用**，不是每次 `create_pool`
+- [ ] `enqueue_sync` 的 Redis 连接池是**单例复用**（在 `redis_client` 里），不是每次 `create_pool`
 - [ ] reaper 投递失败**跳过当前项**，不中断整批
-- [ ] 迁移里三张表都有 `server_default='PENDING'`
+- [ ] 迁移里三张表都有 `server_default='PENDING'`（✅ `49a0c3b7f694` 已验证）
 - [ ] `docs/启动命令.md` 补了 worker 与 reaper 两条命令
 
 ---
@@ -453,7 +649,53 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 | # | 事项 | 说明 |
 |---|---|---|
 | 1 | 🟡 状态值大小写是否统一 | 本设计按拍板用大写；`chat_message.status` 是小写。改任一边要同步另一边 |
-| 2 | 📌 消费记录的分层不一致 | `create/update/delete_record` **直接写在 router 里，没有 repo 层**（其他两张表都有）。本设计不改造，只按§5.1.1 接线。要不要补 repo 层另议 |
+| 2 | 📌 消费记录的分层不一致 | `create/update/delete_record` **直接写在 router 里，没有 repo 层**（其他两张表都有）。本设计不改造，只按 §5.1.1 接线。要不要补 repo 层另议 |
 | 3 | 🟡 切片是否含分组 | 现状 = `name + specs + note`（不含分组）。**保持现状**，别顺手加 |
 | 4 | 📌 Redis 在服务器上的部署 | 与服务器部署一并做（与流式设计 §2.5 的连接池待办一起） |
-| 5 | 📌 arq / redis 包未装 | 实测 `pip show redis rq` → 均未安装；`requirements.txt:46` 只写了 `redis>=5.0`，**`arq` 完全没提**。Redis 服务本身在跑（6379 监听中） |
+| 5 | ✅ **`arq` / `redis` 已装** | 2026-10-17 实测 `pip show`：`arq 0.28.0`、`redis 5.3.1`；Redis 服务在跑（`redis_version=5.0.14.1`）。⚠️ **`requirements.txt` 还没同步**（只写了 `redis>=5.0`，**`arq` 完全没提**）—— 别人 clone 下来跑不了 worker |
+| 6 | ⚠️ **`arq` 已进入 maintenance-only** | PyPI 官方元数据：`arq 0.28.0`，作者声明仅维护、不计划新功能。**功能上够用**（异步任务/Retry/_job_id 去重/cron 都有）；风险是将来要优先级、结果面板得迁——**迁移成本低**（任务函数是普通 `async def`，只改 WorkerSettings 与投递那几行）。**不推翻 20:56 的拍板**，仅记录以备将来 |
+| 7 | ✅ **PG 已启动** | 2026-10-17 实测连通，`item_embedding` 可读写。infra 方案（WSL2 原生 / Docker）**仍是待决**——服务器部署时要一并定 |
+| 8 | ✅ `transfer_to_owned_item` 已返回元组 | 已改成 `return (owned_item, record)`，router 用 `record.id` 投递 purchase（§5.3） |
+| 9 | 🟡 **测试会污染生产 Redis 队列** | `tests/test_index_service.py` 里两处真调了 `enqueue_sync`；跑完测试再起 worker，会消费到测试造的假用户数据并**真调向量模型 API（花钱）**。已在 `docs/启动命令.md` §6 写警告，但**更稳的做法是给测试用独立的 Redis db 或队列名** |
+| 10 | 🟡 `index_service.py` 两处未使用的 import | 第 15 行 `from datetime import datetime`（文件里已不用）、第 44 行函数体内重复 import `get_current_time`。不影响运行，顺手清掉即可 |
+
+---
+
+## 13. 阻塞项
+
+> 2026-10-17 17:10 更新：**前三个阻塞项全部解除**，链路已端到端跑通。
+> 当前**无阻塞项**。
+
+| # | 事项 | 阻塞什么 | 状态 |
+|---|---|---|---|
+| 1 | ~~PG 没启动~~ | — | ✅ 已解决 |
+| 2 | ~~`arq` 没装~~ | — | ✅ 已解决 |
+| 3 | ~~`redis_url` 字段没加~~ | — | ✅ 已解决 |
+
+**剩下的不阻塞**：读取侧（第 9 步）是当前唯一在建的东西。
+
+---
+
+## 14. `redis_url` 为什么不给默认值
+
+**`Settings` 里有两种写法，本项目两种都在用，各有理由**：
+
+| 写法 | 现有例子 | 含义 |
+|---|---|---|
+| `str`（无默认值） | `db_url`、`captcha_key`、`pw_max_length` | **必填**，`.env` 缺了就该在启动时炸 |
+| `str \| None = None` | `pg_url`、`bocha_api_key` | **可选**，缺了功能降级 |
+| `str = "默认值"` | `cookie_secure: bool = False` | 有安全默认，缺了也能跑 |
+
+`redis_url` 该用**第一种**：
+
+```python
+redis_url : str        # 必填
+```
+
+**给了默认值的后果**：`.env` 里 key 拼错（比如写成 `REDIS_URL` 写成 `REDIS_URI`）不会报错，
+Settings 会静默用上默认值 `127.0.0.1:6379`——**部署到服务器时，worker 连的是服务器本机的 Redis，
+而你以为连的是配置的那个**。这类 bug 只在换环境时才暴露，最难查。
+
+**这与 `pg_url` 不同**：`pg_url` 可以是 `None`，因为没有 PG 时 RAG 检索整个降级、
+Web 服务照常跑；而 Redis 是**任务队列的唯一通道**，没有它 worker 完全跑不起来，
+应当启动即炸。

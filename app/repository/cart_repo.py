@@ -1,13 +1,13 @@
-
-from sqlalchemy import select, delete, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.errors import BizError, ErrorCode
-from app.models import CartItem, ItemGroupRef, OwnedItem, PurchaseRecord
+from app.models import CartItem,  OwnedItem, PurchaseRecord
 from app.schemas.cart_sche import CartItemInSchema, CartItemUpdateSchema
 from app.schemas.purchase_sche import PurchaseInputSchema
 from app.services import image_service
 from app.repository.group_repo import delete_refs_by_item, repoint_refs_on_transfer
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def get_cart_by_user_id(user_id: int,session : AsyncSession)->list[CartItem]:
@@ -35,7 +35,11 @@ async def delete_cart_item(item_id: int,user_id: int,session : AsyncSession):
     released_path = item.image
     await session.delete(item)
     # 分组跟随：物品没了，它在各分组里的成员关系一起走（同一事务）
-    await delete_refs_by_item("cart", item_id, session)
+    try:
+        await delete_refs_by_item("cart", item_id, session)
+    except Exception:
+        logger.warning("删向量副本失败 %s:%s（主流程已成功，残留由 reaper 兜）",
+                       "cart", item_id, exc_info=True)
     await session.commit()
     # 删完再判释放：此刻两张 item 表若都没人引用这张图，置 released 待清理
     await image_service.release_if_unreferenced(released_path, session)
@@ -87,4 +91,4 @@ async def transfer_to_owned_item(item_id: int,user_id: int,session : AsyncSessio
     await repoint_refs_on_transfer(item_id, owned_item.id, session)
     await session.commit()
     await session.refresh(owned_item)
-    return owned_item
+    return (owned_item,record)

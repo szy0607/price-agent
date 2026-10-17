@@ -16,6 +16,8 @@ from app.schemas.owned_sche import (
     OwnedItemUpdateSchema,
 )
 
+from app.services import index_service
+
 owned_router = APIRouter(tags=["owned"], prefix="/items")
 
 
@@ -33,20 +35,23 @@ async def get_latest_items(user: CurrentUser, session: AsyncSession = Depends(ge
 
 @owned_router.post("", dependencies=[Depends(require_same_origin_write)])
 async def add_item(owned_item_in: OwnedItemInSchema, user: CurrentUser,
-                   session: AsyncSession = Depends(get_db_session)):
+    session: AsyncSession = Depends(get_db_session)):
     item = await add_owned_item(owned_item_in, user.id, session)
+    await index_service.enqueue_sync(user.id, "owned", item.id)
     return success(OwnedItemOutSchema.model_validate(item))
 
 
 @owned_router.patch("/{item_id}", dependencies=[Depends(require_same_origin_write)])
 async def update_item(item_id: int, update_in: OwnedItemUpdateSchema, user: CurrentUser,
-                      session: AsyncSession = Depends(get_db_session)):
+       session: AsyncSession = Depends(get_db_session)):
     item = await update_owned_item(update_in, user.id, item_id, session)
+    await index_service.enqueue_sync(user.id, "owned", item.id)
     return success(OwnedItemOutSchema.model_validate(item))
 
 
 @owned_router.delete("/{item_id}", dependencies=[Depends(require_same_origin_write)])
 async def delete_item(item_id: int, user: CurrentUser,
-                      session: AsyncSession = Depends(get_db_session)):
+  session: AsyncSession = Depends(get_db_session)):
     await delete_owned_item(item_id, user.id, session)
+    await index_service.drop_vector(user.id, "owned", item_id)
     return success({"id": item_id})

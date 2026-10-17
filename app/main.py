@@ -23,7 +23,7 @@ from app.router.setting import settings_router
 from app.router.upload import upload_router
 from app.services import image_service
 from app.database.pg_session import start_pg_engine, close_pg_engine
-
+from app.core.redis_client import close_pool
 # 图片清理间隔：pending 超 24h / released 的文件与行。幂等，多 worker 重复跑无害
 _IMAGE_CLEANUP_INTERVAL = 3600
 
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         cleanup_task.cancel()
+        await close_pool()
         await close_http_client()
         await close_pg_engine()
 
