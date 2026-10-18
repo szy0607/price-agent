@@ -12,7 +12,6 @@ from app.database.session import async_session_local
 from app.models import CartItem, OwnedItem, PurchaseRecord
 from app.repository import vector_repo
 from app.services.embed_slice import build_item_text
-from datetime import datetime
 logger = logging.getLogger(__name__)
 PENDING = "PENDING"
 RUNNING = "RUNNING"
@@ -41,7 +40,9 @@ async def set_synced(user_id: int, source_type: str, item_id: int,
        session: AsyncSession) -> None:
     """置 SYNCED + 写 index_time。**只能在 PG 写入成功之后调"""
     model = _MODELS[source_type]
-    from app.core.time import get_current_time
+    # 🔴 时间值唯一来源 = Python 侧（项目铁律）。用 get_current_time() 而不是
+    #    UTC_TIMESTAMP()：这条update 与业务写在不同 session 里，走 DB 侧默认值
+    #    会因迁移连接与应用连接的时区设置不同而产生偏差。
     await session.execute(
         update(model)
         .where(model.id == item_id, model.user_id == user_id)

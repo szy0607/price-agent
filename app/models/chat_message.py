@@ -1,7 +1,7 @@
 from datetime import datetime
 
 
-from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, text
+from sqlalchemy import DateTime, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import get_current_time

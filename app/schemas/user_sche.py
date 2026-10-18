@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional,Annotated
+from typing import Annotated
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
