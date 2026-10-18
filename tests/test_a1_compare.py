@@ -37,10 +37,43 @@ def _state(tool_calls: list) -> dict:
     }
 
 
+def _key():
+    """假 KeyRecord —— call_model 要的是这个类型不是 None（我第一版传了 None）。"""
+    from app.services.api_key_service import KeyRecord
+    return KeyRecord(key_id=1, provider="t", base_url="https://x.invalid/v1",
+                     api_key="k", model_name="m")
+
+
 class _FakeSession:
     async def __aenter__(self): return self
     async def __aexit__(self, *a): return False
     async def execute(self, *a, **k): return None
+
+
+@pytest.fixture(autouse=True)
+def no_paid_calls(monkeypatch):
+    """🔴 **绝不能让测试真调博查 / 主模型**。
+
+    compare_specs_service.fetch_specs 内部 = 每件 1 次博查（0.036 元），
+    compare_service 那步 = 1 次主模型。3 件 = 0.108 元/次。
+    跑 205 个测试时只要有一个没 mock，就是真花钱。
+
+    这条 fixture 是**阶段 3 加的**——之前 compare 是占位实现，不花钱，
+    所以没有 mock。现在接了真实现，必须挡住。
+    """
+    async def fake_fetch(items, user_id, session):
+        return {n: {"name": n, "price": 100, "specs": {"品牌": "测试"}}
+                for n in items}
+
+    async def fake_call_model(key, messages, **kw):
+        return (json.dumps({
+            "dimensions": [{"name": "重量", "values": {"a": "250g", "b": "61g"},
+                            "winner": "b"}],
+            "summary": "b 更轻"
+        }, ensure_ascii=False), "fake-model", [])
+
+    monkeypatch.setattr(a1.compare_specs_service, "fetch_specs", fake_fetch)
+    monkeypatch.setattr(a1.model_call, "call_model", fake_call_model)
 
 
 # ---------- 1. route 按工具名分派 ----------
@@ -90,17 +123,27 @@ async def test_compare_truncates_over_three_items():
     字母 d 会出现。**必须用逗号分隔的商品名片段来判断**。
     （2026-10-18 第一版就是这么写错的，白跑一轮。）
     """
+    requested = {}
+
+    async def spy_fetch(items, user_id, session):
+        requested["items"] = list(items)
+        return {n: {"name": n, "price": 1, "specs": {}} for n in items}
+
+    a1.compare_specs_service.fetch_specs = spy_fetch
+
     sink = a1.TextSink()
     call = _call(a1.COMPARE_TOOL_NAME, {
         "question": "哪个好",
         "items": ["商品甲", "商品乙", "商品丙", "商品丁"],
     })
-    out = await a1.compare(_state([call]), sink, _FakeSession())
+    out = await a1.compare(_state([call]), sink, _key(), _FakeSession())
 
-    text = out["messages"][-1]["content"]
-    assert "商品丁" not in text, "第 4 件应该被丢掉：" + text
-    for kept in ("商品甲", "商品乙", "商品丙"):
-        assert kept in text, kept + " 应该保留"
+    # 🔴 断言要看**「取参时实际请求了哪几件」**，而不是「输出文本里出现哪个名字」。
+    #    截断的意义就是省钱（少 1 次博查），所以关键证据是请求列表。
+    #   （第一版断言写在输出文本上，mock 固定返回 a/b 所以测不出来，白跑一轮。）
+    assert requested["items"] == ["商品甲", "商品乙", "商品丙"], (
+        "取参只应请求 3 件，实际：" + str(requested["items"]))
+    assert "商品丁" not in requested["items"]
     assert out["compare_rounds"] == 1
 
 
@@ -108,7 +151,7 @@ async def test_compare_rejects_fewer_than_two():
     """少于 2 件没法比 —— 要给模型明确指引，不是空结果。"""
     sink = a1.TextSink()
     call = _call(a1.COMPARE_TOOL_NAME, {"question": "q", "items": ["只有一个"]})
-    out = await a1.compare(_state([call]), sink, _FakeSession())
+    out = await a1.compare(_state([call]), sink, _key(), _FakeSession())
     assert "至少需要 2 件" in out["messages"][-1]["content"]
 
 
@@ -120,10 +163,24 @@ async def test_compare_degrades_when_question_missing():
     「维度按用户问题定」是 A4 的核心，但模型漏填时
     退化到「按品类对比」远好过整个对比失败（三道保险的第三道）。
     """
+    # 🔴 降级现在发生在**拼 prompt 时**（compare_service.build_messages），
+    #    不是返回一段占位文本（那是阶段 2 的行为，阶段 3 换掉了）。
+    #    所以要看**传给 call_model 的 messages 里有没有「按品类」那句**。
+    seen = {}
+
+    async def spy_call(key, messages, **kw):
+        seen["messages"] = messages
+        return (json.dumps({"dimensions": [], "summary": "s"}), "m", [])
+
+    a1.model_call.call_model = spy_call
+
     sink = a1.TextSink()
     call = _call(a1.COMPARE_TOOL_NAME, {"items": ["索尼", "AirPods"]})
-    out = await a1.compare(_state([call]), sink, _FakeSession())
-    assert "品类" in out["messages"][-1]["content"]
+    await a1.compare(_state([call]), sink, _key(), _FakeSession())
+
+    user_msg = seen["messages"][-1]["content"]
+    assert "品类" in user_msg, "question 为空时应按品类通用维度对比：" + user_msg
+    assert "真正关心的问题" not in user_msg, "不该出现「用户关注点」的措辞"
 
 
 async def test_compare_emits_agent_events():
@@ -134,7 +191,7 @@ async def test_compare_emits_agent_events():
     """
     sink = a1.TextSink()
     call = _call(a1.COMPARE_TOOL_NAME, {"question": "q", "items": ["a", "b"]})
-    await a1.compare(_state([call]), sink, _FakeSession())
+    await a1.compare(_state([call]), sink, _key(), _FakeSession())
     phases = [ev["phase"] for ev in sink._agents]
     assert phases == ["start", "end"], "应该成对，实际 " + str(phases)
 

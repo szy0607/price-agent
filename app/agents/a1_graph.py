@@ -50,7 +50,8 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import async_session_local
-from app.services import model_call, rag_service
+from app.services import (compare_service, compare_specs_service,
+                         model_call, rag_service)
 from app.services.api_key_service import KeyRecord
 
 logger = logging.getLogger(__name__)
@@ -370,7 +371,8 @@ async def search(state: RagState, session: AsyncSession) -> dict:
             "tool_calls": []}
 
 
-async def compare(state: RagState, sink: TextSink, session: AsyncSession) -> dict:
+async def compare(state: RagState, sink: TextSink, key: KeyRecord,
+                session: AsyncSession) -> dict:
     """执行对比工具（A4）：把结果作为 role="tool" 消息追加进 messages。
 
     🔴 **本阶段只做「取出参数 → 生成占位结果」**（2026-10-18）。
@@ -406,18 +408,13 @@ async def compare(state: RagState, sink: TextSink, session: AsyncSession) -> dic
             if len(items) < 2:
                 text = ("对比失败：至少需要 2 件商品才能比较，"
                         "你只提供了 %d 件。请让用户明确要比较哪几件。" % len(items))
-            elif not question:
-                # 🔴 question 为空 → **降级**而不是报错。
-                #   「维度按用户问题定」是A4 的核心，但模型漏填时
-                #   退化到「按品类对比」远好过整个对比失败。
-                #   （见 docs/A4对比与A5推荐-设计.md §2.2 的三道保险）
-                logger.info("compare 未拿到 question，降级为按品类对比")
-                text = (f"请按【商品品类】的通用关键参数对比这几件：{'、'.join(items)}。"
-                        f"（用户没有明确说明关注点，按品类通用维度对比。）")
             else:
-                # 📌 阶段 3 在这里换成：联网取参 + 分维度对比
-                text = (f"待对比：{'、'.join(items)}；用户关注：{question}。"
-                        "（参数获取与维度对比尚未接入，见 docs/A4对比与A5推荐-设计.md）")
+                # 🔴 2026-10-18 阶段 3：接上真的取参 + 分维度对比。
+                #   ⚠️ **这一段是真花钱的**（3 件 = 3 次博查 ≈ 0.108 元 + 1 次主模型）。
+                #   测试里 compare_specs_service 与 compare_service **全部 mock**，
+                #   一次博查都不该真调——写测试时注意。
+                text = await _run_comparison(
+                    items, question, state["user_id"], key, session)
 
             new_messages.append({
                 "role": "tool", "tool_call_id": call.id, "content": text,
@@ -428,6 +425,54 @@ async def compare(state: RagState, sink: TextSink, session: AsyncSession) -> dic
     return {"messages": new_messages,
             "compare_rounds": state.get("compare_rounds", 0) + 1,
             "tool_calls": []}
+
+
+async def _run_comparison(items: list[str], question: str, user_id: int,
+                          key: KeyRecord, session: AsyncSession) -> str:
+    """取参 + 分维度对比，返回给模型看的文本。**永不抛异常**。
+
+    三步（顺序不能换）：
+      ①联网取参      → compare_specs_service（花钱）
+      ② 按问题选维度  → compare_service（主模型，不联网）
+      ③ 渲染成文本    → 回给 decide，让它基于这个组织最终回答
+
+    🔴 **任何一步失败都返回一段「说明情况」的文本**，而不是抛异常——
+    decide 拿到它仍然可以回答用户（哪怕是「我没能查到这几点」）。
+
+    ⚠️ `key` 是 decide 那次调用用的同一个 KeyRecord（闭包传进来）。
+    `call_model` 要的是 KeyRecord 不是 None —— 我第一版传了 None，
+    查签名才发现。
+    """
+    # ① 取参
+    try:
+        specs = await compare_specs_service.fetch_specs(items, user_id, session)
+    except Exception:
+        # fetch_specs 内部已逐件吞异常，走到这里说明是它之外的意外
+        logger.warning("对比取参整体异常", exc_info=True)
+        specs = {}
+    if not specs:
+        return ("未能获取到这几件商品的参数（可能网络搜索未配置，"
+                "或这几个名称搜索不到）。请直接依据已有信息回答，"
+                "**不要编造参数**。")
+
+    specs_lines = [compare_specs_service.format_specs_line(n, d)
+                   for n, d in specs.items()]
+    found = "、".join(specs)
+    if len(specs) < len(items):
+        # 🔴 部分失败要**明说哪几件没查到** —— 不说的话用户会以为比全了
+        missing = "、".join(i for i in items if i not in specs)
+        specs_lines.append(f"-（{missing}）⚠️ 未查到参数")
+
+    # ②③ 选维度 + 渲染
+    try:
+        raw, _model, _tool_calls = await model_call.call_model(
+            key, compare_service.build_messages(list(specs), specs_lines, question))
+    except Exception as exc:
+        logger.warning("对比 prompt 调用失败", exc_info=True)
+        return f"参数已查到（{found}），但没能完成结构化对比（{type(exc).__name__}）。"
+
+    result = compare_service.parse_comparison(raw, list(specs))
+    return compare_service.format_comparison(result)
 
 
 def route(state: RagState) -> str:
@@ -466,7 +511,7 @@ def build_graph(key: KeyRecord, sink: TextSink):
 
     async def node_compare(state: RagState) -> dict:
         async with async_session_local() as session:
-            return await compare(state, sink, session)
+            return await compare(state, sink, key, session)
 
     g = StateGraph(RagState)
     g.add_node("decide", node_decide)
