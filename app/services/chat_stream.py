@@ -6,7 +6,7 @@
   阶段③ 新开连接：persist_reply() 按最终状态落库
 
 🔴 阶段② 编排归LangGraph，不在这里手写（2026-10-18 改）：
-  `app/agents/rag_graph.py` 的 decide ⇄ search 图自己决定要不要调检索工具。
+  `app/agents/a1_graph.py` 的 decide 节点自己决定要不要调工具（当前只有检索）。
   本模块只做三件事：建图、轮询 sink 转发 SSE、兜住取消与异常。
   **别在这里展开工具循环** —— 那是编排，会让本模块同时承担两层职责。
 
@@ -25,7 +25,7 @@ import logging
 
 from fastapi import BackgroundTasks
 
-from app.agents import rag_graph
+from app.agents import a1_graph
 from app.database.session import async_session_local
 from app.repository import chat_repo
 from app.schemas.chat_sche import ChatSendInSchema
@@ -107,7 +107,7 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
 
     # ---------- 阶段②：零连接，跑图 + 流式吐字 ----------
     # 🔴 2026-10-18：从「直接调模型」改成「跑 LangGraph」。
-    #    图自己决定要不要调检索工具（见 app/agents/rag_graph.py）。
+    #    图自己决定要不要调工具（见 app/agents/a1_graph.py）。
     #
     # 🔴 **为什么必须用 sink 而不是 astream 的事件**：
     #    节点的文本通过 `sink.write()` 出来（`get_stream_writer` 在 Python 3.10
@@ -115,8 +115,8 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
     #    而 `stream_mode="updates"` 只在**节点结束后**给最终值、拿不到过程。
     #    所以只能「并发跑图 + 同时轮询 sink」。
     collected: list[str] = []
-    sink = rag_graph.TextSink()
-    graph = rag_graph.build_graph(prepared.key, sink)
+    sink = a1_graph.TextSink()
+    graph = a1_graph.build_graph(prepared.key, sink)
     run_task: asyncio.Task | None = None
 
     try:
@@ -129,7 +129,7 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
                 },
                 # 🔴 必须显式传。LangGraph 1.2.4 默认 10007（不是 0.x 的 25），
                 #    不设 = 死循环 ≈ 4 小时 + 烧钱。compile() 上**不能**传这个参数。
-                config={"recursion_limit": rag_graph.RECURSION_LIMIT},
+                config={"recursion_limit": a1_graph.RECURSION_LIMIT},
             )
         )
         # 图在跑的同时轮询 sink。实测可行：拿到 8 块文本。

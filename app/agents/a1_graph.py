@@ -1,3 +1,47 @@
+"""A1 编排图 —— 理解 / 路由（主管）。
+
+    🔴 **2026-10-18 大宋拍板：从 `rag_graph.py` 改名为 `a1_graph.py` 并重新定位。**
+
+    ## 为什么改名
+
+    原名 `rag_graph` 是在只有「检索」一个节点时起的，加进对比节点后名不副实——
+    而且 **`decide` 节点从一开始干的就是 A1 的活**（`Agent编号约定.md` §1 定义
+    A1 = 「理解 / 路由（主管）——判断用户这句话该交给谁」）：
+    它调模型、看模型决定调什么工具、决定调几次。**RAG 只是它目前掌握的一个工具。**
+
+    继续叫 `rag_graph` 会让后面的人困惑：「为什么对比功能在 RAG 文件里？」
+
+    ## 为什么工具必须在同一个图里（硬约束，不是偏好）
+
+    把 compare 独立成另一个图 → 它与本图之间**没有状态通道**，`messages` 传不过去
+    → 得自己造队列 / 缓存 → **那就是手写编排**
+    → 又回到「在一个用编排框架的项目里手写编排」（2026-10-18 大宋撤回「固定前置」的理由）。
+
+    ## 当前实现进度
+
+    ```
+    START → decide ─┬─ 要检索 → search ─┐
+                    └─ 直接答 → END      ↓
+                          decide（把检索结果带进上下文）
+    ```
+
+    - ✅ `search`：调`rag_service.retrieve_relevant`
+    - ⬜ `compare`：A4 参数对比（docs/A4对比与A5推荐-设计.md）
+    - ⬜ `recommend`：A5 推荐（走博查联网）
+    - ⬜ `card`：商品卡片（docs/对话侧商品卡片-设计.md）
+
+    ⚠️ **加节点后 `MAX_ROUNDS` 与 `RECURSION_LIMIT` 必须重算并实测**——
+    见下方常量处的实测记录（我按轮数直觉算错过一次）。
+
+    ## 🔴 为什么节点用 TextSink 而不是 LangGraph 的 get_stream_writer
+    实测 `get_stream_writer()` 在 **Python 3.10 下必然抛**
+    `RuntimeError: Called get_config outside of a runnable context`
+    （根因 `langgraph/_internal/_runnable.py:483-492`：3.10 那条分支不 set contextvar）。
+    而 `stream_mode="updates"` 只在节点**结束后**给最终值、拿不到过程。
+    **所以自己做 sink**：纯 Python、不依赖 contextvar、最稳。
+    将来若升级到 Python 3.11+，可改用 get_stream_writer 把这层删掉。
+"""
+
 import asyncio
 import logging
 from typing import Annotated, TypedDict
@@ -128,7 +172,14 @@ _DISABLED_TOOL = [{
 
 async def decide(state: RagState, sink: TextSink, key: KeyRecord,
                  session: AsyncSession) -> dict:
-    """调模型（带工具定义），让它决定「调检索工具」还是「直接回答」。
+    """🔴 **这个节点就是 A1 本体**：调模型（带工具定义），让它决定调哪个工具。
+
+    A1 的职责是「判断用户这句话该交给谁」——`decide` 做的正是这件事：
+    读对话 → 问模型「要不要调工具、调哪个」→ 按模型的 tool_calls 分发到对应节点。
+
+    **目前只有一个工具**（`search_my_items`）；加compare / recommend / card 时
+    只需要往 `tools` 列表里追加，路由逻辑（`route`）不用改——
+    它只认「有没有 tool_calls」，不认具体是哪个工具。
 
     流式产出：文本增量写进 sink；工具调用收齐后放进 state。
     """

@@ -31,7 +31,7 @@ import json
 import pytest
 from fastapi import BackgroundTasks
 
-from app.agents import rag_graph as rg
+from app.agents import a1_graph as a1
 from app.repository import chat_repo
 from app.schemas.chat_sche import ChatSendInSchema
 from app.services import chat_service, chat_stream, model_call

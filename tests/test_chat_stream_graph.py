@@ -1,6 +1,6 @@
 """chat_stream 接 LangGraph 编排后的行为测试（2026-10-18）。
 
-编排从「直接调stream_model」改成「跑 rag_graph 的 decide ⇄ search 图」后，
+编排从「直接调stream_model」改成「跑 a1_graph 的 decide 图」后，
 本模块锁四类「漏了不报错」的行为：
 
 1. **最后一个字不能丢**：图跑完那一刻 sink 里可能还有字没被 flush 走，
@@ -13,7 +13,7 @@
 ## 为什么用假 graph 而不是真图
 
 真图要连 PG + 真调 embedding（花钱）。本模块锁的是**编排层的行为**，
-所以只把「图往 sink 里写字」这一层换掉，节点逻辑由 rag_graph 自己的测试管。
+所以只把「图往 sink 里写字」这一层换掉，节点逻辑由 a1_graph 自己的测试管。
 
 🔴 **写这个文件时踩过一个坑**：第一版假 graph 没接 sink（`self.sink = None`），
 图永远写不进东西，三个测试全红成 `status=failed`——**看起来像代码坏了，其实是探针错了**。
@@ -37,7 +37,7 @@ _captured: dict = {}
 
 
 class FakeSink:
-    """替身：跟 rag_graph.TextSink 同接口，但不依赖真实模型。"""
+    """替身：跟 a1_graph.TextSink 同接口，但不依赖真实模型。"""
 
     def __init__(self) -> None:
         self._pending: list[str] = []
@@ -56,7 +56,7 @@ class FakeSink:
 def _make_build(script, boom=None, extra_messages=None):
     """造 build_graph 的替身：接sink、按时序写文本、可选抛异常、可选返回新增消息。
 
-    🔴 `sink` 必须从 build_graph 的入参拿——真实 rag_graph 里
+    🔴 `sink` 必须从 build_graph 的入参拿——真实 a1_graph 里
        sink 是闭包捕获的（见 build_graph 里的 node_decide）。
        第一版探针写成 `self.sink = None` 就因为漏了这步全红。
 
@@ -117,7 +117,7 @@ def stub_all(monkeypatch):
     monkeypatch.setattr(cs, "_persist", _fake_persist)
     monkeypatch.setattr(cs.chat_service, "prepare_chat", _fake_prepare)
     monkeypatch.setattr(cs, "_schedule_profile", lambda *a, **k: None)
-    monkeypatch.setattr(cs.rag_graph, "TextSink", FakeSink)
+    monkeypatch.setattr(cs.a1_graph, "TextSink", FakeSink)
     _captured.clear()
 
 
@@ -133,7 +133,7 @@ def _deltas(frames: list[str]) -> list[str]:
 
 async def _run(script, boom=None) -> list[str]:
     """跑一遍chat_stream，收集所有 SSE 帧。"""
-    cs.rag_graph.build_graph = _make_build(script, boom)
+    cs.a1_graph.build_graph = _make_build(script, boom)
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
     return [frame async for frame in gen]
 
@@ -166,7 +166,7 @@ async def test_cancel_persists_partial():
     """
     import asyncio
 
-    cs.rag_graph.build_graph = _make_build([("慢", 0.05)] * 60)
+    cs.a1_graph.build_graph = _make_build([("慢", 0.05)] * 60)
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
 
     frames = []
@@ -243,12 +243,12 @@ async def test_recursion_limit_passed_to_graph():
                 return {"answer": "", "round_no": 2, "messages": state.get("messages", [])}
         return _G()
 
-    cs.rag_graph.build_graph = _build
+    cs.a1_graph.build_graph = _build
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
     _ = [f async for f in gen]
 
     assert "recursion_limit" in seen, "没传 recursion_limit —— 默认 10007 会死循环"
-    assert seen["recursion_limit"] == cs.rag_graph.RECURSION_LIMIT
+    assert seen["recursion_limit"] == cs.a1_graph.RECURSION_LIMIT
 
 
 # ---------- 5. 9g：按 messages 逐条落库 ----------
@@ -270,7 +270,7 @@ async def test_new_messages_sliced_not_whole_history():
         {"role": "tool", "tool_call_id": "c1", "content": "检索到 1 件"},
     ]
 
-    cs.rag_graph.build_graph = _make_build([("推荐索尼耳机。", 0)],
+    cs.a1_graph.build_graph = _make_build([("推荐索尼耳机。", 0)],
                                           extra_messages=initial + added)
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
     _ = [f async for f in gen]
@@ -291,7 +291,7 @@ async def test_persist_routes_to_graph_messages_when_present():
     """
     initial = [{"role": "system", "content": "你是导购"},
                {"role": "user", "content": "送人送什么好"}]
-    cs.rag_graph.build_graph = _make_build([("答", 0)], extra_messages=initial + [
+    cs.a1_graph.build_graph = _make_build([("答", 0)], extra_messages=initial + [
         {"role": "assistant", "content": None,
          "tool_calls": [{"id": "c1", "type": "function",
                          "function": {"name": "f", "arguments": "{}"}}]},
@@ -307,7 +307,7 @@ async def test_no_new_messages_falls_back_to_single_persist():
 
     不是 None 也不是有值 —— 是**空列表**。
     """
-    cs.rag_graph.build_graph = _make_build([("直接回答", 0)], extra_messages=None)
+    cs.a1_graph.build_graph = _make_build([("直接回答", 0)], extra_messages=None)
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
     _ = [f async for f in gen]
     assert _captured["new_messages"] in (None, [])
