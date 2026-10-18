@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { PhArchive, PhChatsCircle, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhChatsCircle, PhCheck, PhCircleNotch, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import ItemChip from '../components/ItemChip.vue'
 import ItemRow from '../components/ItemRow.vue'
@@ -282,6 +282,16 @@ async function send() {
         } else if (event === 'delta') {
           reply.text += data.text
           scrollToBottom()
+        } else if (event === 'agent') {
+          // 🔴 过程提示（「正在对比…」）：挂到**当前正在生成的那条消息**上，
+          //    和 delta 同一个对象——它是这条回答的过程，不是独立消息。
+          //
+          //    ⚠️ 刷新后这些提示会消失（后端不落 agent 事件：它是瞬时状态，
+          //    与 index_status 同类）。这是刻意的——落库的话历史里会堆满
+          //    「正在对比…」，而 tool_calls 那行已经能说明「系统做了什么」。
+          if (!reply.agents) reply.agents = []
+          reply.agents.push({ name: data.name, phase: data.phase, label: data.label })
+          scrollToBottom()
         } else if (event === 'error') {
           // 后端已翻译成用户可读中文；失败不能只存在于流里，输入框上方也要显示
           errorMessage.value = data.error
@@ -290,7 +300,6 @@ async function send() {
           if (data.message_id) reply.id = data.message_id
           if (data.status === 'interrupted') interrupted = true
         }
-        // event === 'agent'：子 agent「在调用」提示位，当前后端还没发，先按协议留着
       },
       controller.signal,
     )
@@ -428,6 +437,18 @@ onMounted(async () => {
                 <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
                   <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
                 </div>
+                <!-- 🔴 过程提示（「正在对比…」）：一格一格累加，渲染在正文上方。
+                     与 tool_calls 同一个位置但语义不同：
+                     这个是**进行时**（转圈），那个是**已完成**（可展开看结果）。 -->
+                <p v-if="message.agents && message.agents.length" class="mb-1.5 text-xs text-zinc-400">
+                  <span v-for="(a, i) in message.agents" :key="i" class="mr-2 inline-flex items-center gap-1">
+                    <!-- 只有 start 阶段转圈；end 之后就该收起了，
+                         所以这里给个「完成后淡出」而不是一直转。 -->
+                    <PhCircleNotch v-if="a.phase === 'start'" :size="11" class="animate-spin" />
+                    <PhCheck v-else :size="11" class="text-emerald-500" />
+                    {{ a.label || a.name }}
+                  </span>
+                </p>
                 <!-- 🔴 工具调用提示：一行可展开（2026-10-18，大宋定的形态）。
                      存在意义：用户刷新后要看得见「系统翻了我的物品库」——
                      不显示就是**凭空给出一个答案**，用户不知道依据是什么（信任问题）。 -->

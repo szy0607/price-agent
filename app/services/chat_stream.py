@@ -137,6 +137,11 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
             for piece in await sink.flush():
                 collected.append(piece)
                 yield _sse("delta", {"text": piece})
+            # 🔴 agent 事件单独取、单独发（2026-10-18 加）。
+            #    **不能进 collected** —— 它是过程提示不是正文，混进去会让
+            #    落库的 answer 里出现「正在对比…」这种噪声。
+            for ev in await sink.flush_agents():
+                yield _sse("agent", ev)
             # 🔴 这个 sleep(0) 不能省：不让出控制权的话，图里的节点永远拿不到
             #    CPU → 前端看到「转圈半天然后失败」。
             await asyncio.sleep(0)
@@ -146,6 +151,9 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
         for piece in await sink.flush():
             collected.append(piece)
             yield _sse("delta", {"text": piece})
+        # 🔴 agent 事件同样要补取：节点可能刚好在最后一刻写了「对比结束」。
+        for ev in await sink.flush_agents():
+            yield _sse("agent", ev)
 
         final_state = await run_task
     except (asyncio.CancelledError, GeneratorExit):

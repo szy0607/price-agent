@@ -41,10 +41,14 @@ class FakeSink:
 
     def __init__(self) -> None:
         self._pending: list[str] = []
+        self._agents: list[dict] = []
 
     def write(self, chunk: str) -> None:
         if chunk:
             self._pending.append(chunk)
+
+    def write_agent(self, name: str, phase: str, label: str = "") -> None:
+        self._agents.append({"name": name, "phase": phase, "label": label})
 
     async def flush(self) -> list[str]:
         # 🔴 这里用 sleep(0) 而非真的等：探测「循环外补flush」有没有生效，
@@ -52,8 +56,12 @@ class FakeSink:
         out, self._pending = self._pending, []
         return out
 
+    async def flush_agents(self) -> list[dict]:
+        out, self._agents = self._agents, []
+        return out
 
-def _make_build(script, boom=None, extra_messages=None):
+
+def _make_build(script, boom=None, extra_messages=None, agents=None):
     """造 build_graph 的替身：接sink、按时序写文本、可选抛异常、可选返回新增消息。
 
     🔴 `sink` 必须从 build_graph 的入参拿——真实 a1_graph 里
@@ -62,10 +70,16 @@ def _make_build(script, boom=None, extra_messages=None):
 
     `extra_messages` 模拟图跑完后 final_state["messages"] 的完整内容
     （= 初始 messages + 新增）。为 None 时表示**没有新增**。
+
+    `agents` 模拟节点调用 `sink.write_agent(...)`——格式 [(name, phase, label), ...]，
+    在文本之前发出（对应真实场景：节点开始跑 -> 出文本 -> 节点结束）。
     """
     def _build(key, sink):
         class _FakeGraph:
             async def ainvoke(self, state, config=None):
+                for name, phase, label in (agents or []):
+                    sink.write_agent(name, phase, label)
+                    await _sleep(0)
                 for chunk, delay in script:
                     sink.write(chunk)
                     if delay:
@@ -311,3 +325,74 @@ async def test_no_new_messages_falls_back_to_single_persist():
     gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
     _ = [f async for f in gen]
     assert _captured["new_messages"] in (None, [])
+
+# ---------- 7. agent 事件（阶段 1：管道已铺好，节点还没用） ----------
+
+async def test_agent_events_are_sent_as_sse():
+    """🔴 节点调 `write_agent` 时，SSE 要发出 `agent` 事件。
+
+    协议位见 docs/流式输出-设计.md §5.4——2026-10-18 之前只在前端留了
+    「先按协议留着」的注释，后端从不发。这一项锁住管道是通的。
+    """
+    cs.a1_graph.build_graph = _make_build(
+        [("推荐索尼。", 0.01)],
+        agents=[("A4", "start", "正在对比索尼和 AirPods"),
+                ("A4", "end", "")],
+    )
+    gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
+    frames = [f async for f in gen]
+
+    agent_frames = [f for f in frames if "event: agent" in f]
+    assert len(agent_frames) == 2, f"应该有 start + end 两帧，实际 {len(agent_frames)}"
+
+    payload = json.loads(agent_frames[0].split("data: ", 1)[1])
+    assert payload["name"] == "A4"
+    assert payload["phase"] == "start"
+    assert payload["label"] == "正在对比索尼和 AirPods"
+
+
+async def test_agent_events_not_polluted_into_saved_text():
+    """🔴 锁「agent 事件不进落库文本」。
+
+    agent 是过程提示（「正在对比…」），不是正文。混进 `collected` 会让
+    落库的文本里出现噪声，用户刷新后看到「正在对比…推荐索尼。」这种内容。
+
+    🔴 **这条必须在「中断路径」上测**（2026-10-18 写测试时踩到）：
+       正常收完时落库用的是 `final_state["answer"]`，**根本不经过 collected**，
+       所以在正常路径上污染测不出来。只有**中断 / 失败**那条走
+       `_persist(reply="".join(collected))` 才会暴露。
+       第一版测试写的是正常路径，回退-验证也是绿的 —— 白写了。
+    """
+    import asyncio
+
+    # 中断：先发一个 agent 事件，然后慢文本，第 3 帧就停止
+    cs.a1_graph.build_graph = _make_build(
+        [("推荐索尼。", 0.05)] * 60,
+        agents=[("A4", "start", "正在对比索尼和 AirPods")],
+    )
+    gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
+    frames = []
+    with pytest.raises((asyncio.CancelledError, GeneratorExit)):
+        async for frame in gen:
+            frames.append(frame)
+            if len(frames) >= 3:
+                await gen.aclose()
+                raise asyncio.CancelledError()
+
+    assert _captured["status"] == "interrupted"
+    # 🔴 核心断言：中断落库走的是 collected，所以只有这里会看到污染
+    assert "正在对比" not in _captured["reply"], (
+        f"agent 提示污染了中断落库的文本：{_captured['reply']!r}")
+    assert _captured["reply"] == "推荐索尼。"
+
+
+async def test_no_agent_events_when_nodes_dont_call_it():
+    """现阶段还没有节点调 write_agent → **不能凭空造出 agent 事件**。
+
+    这条是回归保护：万一 flush_agents 写错了（比如返回 list 而不是空 list），
+    前端会收到空事件。
+    """
+    cs.a1_graph.build_graph = _make_build([("普通回答", 0.01)])
+    gen = cs.chat_stream(1, ChatSendInSchema(text="hi"), BackgroundTasks())
+    frames = [f async for f in gen]
+    assert not [f for f in frames if "event: agent" in f]

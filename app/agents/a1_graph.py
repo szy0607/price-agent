@@ -102,15 +102,50 @@ class TextSink:
        为什么要 `async def flush()`：它 `await asyncio.sleep(0)` 主动让出控制权。
           节点内部在 `await stream_model(...)` 时才会收到新文本；不让出的话，
           调用方的 while 循环永远拿不到 CPU → 又变成「转圈半天然后失败」。
-       """
+
+       🔴 **为什么 agent 通道和 text 通道分开**（2026-10-18 加）：
+          - `text` 是**模型吐的**（`model_call.StreamEvent` 那条链）
+          - `agent` 是**编排层在干什么**（compare 节点开始跑、推荐节点开始跑）
+          两者来源不同、消费时机不同、丢弃策略也不同。
+          混在一个队列里的话，前端得靠字段区分每一格 —— 而 flush 是按「格」切的，
+          一格里可能混着两者。**分开 flush，调用方一次拿一种，类型干净。**
+
+          ⚠️ 之所以能这么做，是因为 **agent 事件本来就不该塞进 StreamEvent**：
+          那个类是 `model_call.stream_model` 的产出，描述「模型吐了什么」；
+          而「正在对比」是**编排层知道、模型不知道**的事 —— 节点开始跑的时候
+          模型早就返回完了。塞进去就得让模型层发它，可模型层不知道有 compare 节点。
+    """
+
     def __init__(self) -> None:
-        self._pending :list[str] = []
+        self._pending: list[str] = []
+        # agent 事件：{name, phase, label}。name 是节点名（A4 / A5 / 卡片），
+        # phase 是 start / end。见 docs/流式输出-设计.md §5.4 预留的协议位。
+        self._agents: list[dict] = []
+
     def write(self, chunk: str) -> None:
         if chunk:
             self._pending.append(chunk)
+
+    def write_agent(self, name: str, phase: str, label: str = "") -> None:
+        """通知前端「某个节点开始 / 结束了」。
+
+        ⚠️ **这里刻意不做「自动配对 end」的聪明逻辑**（比如只 write("A4")
+           然后自己补 end）—— 节点可能抛异常，异常路径上 end 不会发出，
+           前端就会永远转圈。**start / end 都由节点显式写**，
+           出问题时靠前端超时兜底。
+           这与 chat_stream 取消后不发 done 是**同一个取舍**（见设计文档 §5.10）。
+        """
+        self._agents.append({"name": name, "phase": phase, "label": label})
+
     async def flush(self) -> list[str]:
         await asyncio.sleep(0)
-        out,self._pending = self._pending,[]
+        out, self._pending = self._pending, []
+        return out
+
+    async def flush_agents(self) -> list[dict]:
+        """取出尚未消费的 agent 事件。**取出后即清空**（与 flush 同口径）。"""
+        await asyncio.sleep(0)
+        out, self._agents = self._agents, []
         return out
 
 def _append_messages(left: list, right: list) -> list:
