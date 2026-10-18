@@ -50,21 +50,23 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import async_session_local
-from app.services import (compare_service, compare_specs_service,
-                         model_call, rag_service)
+from app.services import (compare_service, compare_specs_service, model_call,
+                         profile_service, rag_service, recommend_service)
 from app.services.api_key_service import KeyRecord
 
 logger = logging.getLogger(__name__)
 TOOL_NAME = "search_my_items"
 COMPARE_TOOL_NAME = "compare_items"
+RECOMMEND_TOOL_NAME = "recommend_for_me"
 MAX_COMPARE_ITEMS = 3      # 🔴 大宋 22:40 拍板：对比最多 3 件
 
 # 🔴 每种工具的次数上限。**分开计数**，不用一个 MAX_ROUNDS：
 #   - 检索不花钱（用用户自己的 embedding key），所以可以多来几次
-#   - 对比要联网（3 次博查 ≈ 0.108 元），所以卡死
+#   - 对比/推荐要联网（0.108~0.2 元），所以卡死
 #   混成一个数字的话，以后加「花钱的工具」就没法单独限了。
 MAX_SEARCH_ROUNDS = 2
 MAX_COMPARE_ROUNDS = 1
+MAX_RECOMMEND_ROUNDS = 1
 
 # 🔴 实测（2026-10-18，加compare 节点后重新实测）：
 #   最坏路径 = 检索 2 次 + 对比 1 次 + 收尾的 decide：
@@ -83,8 +85,42 @@ MAX_COMPARE_ROUNDS = 1
 #          节点执行 = 2×工具次数 + 1
 #      最坏情况 = 2×(MAX_SEARCH + MAX_COMPARE) + 1 = 2×3+1 = 7
 #   🔴 **改这个数必须重新实测**，别信公式——公式只是给你算个起点。
-RECURSION_LIMIT = 2 * (MAX_SEARCH_ROUNDS + MAX_COMPARE_ROUNDS) + 1 + 1
-#                                          ^+1 是保守余量
+#   ⚠️ 2026-10-18 加 recommend 后从 8 变成 10（多 1 次工具 = 多 2 次节点执行）。
+#      **再次强调：改这个数要重新实测**，不要凭直觉。
+# 🔴🔴 **第三次实测修正**（2026-10-18 加 recommend 后）：
+#   最坏路径（检索2 + 对比1 + 推荐1）实测：**limit=9 撞，10 才通**。
+#   节点执行是 9 次（d1 search d3 search d5 compare d7 recommend d9），
+#   **END 那一跳也算一步** —— 这是我公式漏掉的（第三次了）。
+#     第1次 10-17：按轮数×2 算 5，漏了最后一次 decide
+#     第 2 次 10-18：按边数算 8，漏了「START 不算 super-step」
+#     第 3 次 10-18：按节点执行算 9，**漏了 END 那一跳**
+#   正确算法：**节点执行次数 + 1**（END 占一步）
+RECURSION_LIMIT = 2 * (MAX_SEARCH_ROUNDS + MAX_COMPARE_ROUNDS
+                        + MAX_RECOMMEND_ROUNDS) + 1 + 1
+
+RECOMMEND_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": RECOMMEND_TOOL_NAME,
+        "description": (
+            "根据用户的**偏好画像**推荐他可能想买的东西（会联网搜索新品，"
+            "不只是从他已有的物品里挑）。"
+            "当用户问「我该买什么」「推荐点什么」「送人送什么好」"
+            "这类需要你替他做选购决策的问题时调用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                # 🔴 question 同样进 required：没有用户诉求就不知道该按什么推荐
+                "question": {
+                    "type": "string",
+                    "description": "用户想要什么，用他自己的话概括",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}]
 
 COMPARE_TOOL = [{
     "type": "function",
@@ -238,6 +274,7 @@ class RagState(TypedDict, total=False):
     #   一个数字管全部的话，对比会占检索的额度或者反过来。
     search_rounds: int
     compare_rounds: int
+    recommend_rounds: int
 
 
 # 🔴 没配向量模型时，工具仍要定义，但 description 明说不可用。
@@ -273,6 +310,7 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     user_id = state["user_id"]
     search_rounds = state.get("search_rounds", 0)
     compare_rounds = state.get("compare_rounds", 0)
+    recommend_rounds = state.get("recommend_rounds", 0)
 
     # 🔴 **每个工具单独判次数**（2026-10-18 加compare 时改的）。
     #   之前是「一个 MAX_ROUNDS 管所有工具」，现在必须分开——因为
@@ -283,6 +321,7 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     #   或直接回答。**这是「业务收尾」，与 recursion_limit（死循环兜底）职责不同。**
     can_search = search_rounds < MAX_SEARCH_ROUNDS
     can_compare = compare_rounds < MAX_COMPARE_ROUNDS
+    can_recommend = recommend_rounds < MAX_RECOMMEND_ROUNDS
     has_key = await rag_service.has_embedding_key(user_id, session)
 
     tools: list[dict] = []
@@ -293,6 +332,8 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
         tools.append(SEARCH_TOOL[0] if has_key else _DISABLED_TOOL[0])
     if can_compare:
         tools.append(COMPARE_TOOL[0])
+    if can_recommend:
+        tools.append(RECOMMEND_TOOL[0])
     # ⚠️ tools 为空时传None（模型调用层会当「不带工具」）——
     #   传 [] 有些厂商会当成「有一个空工具列表」而报错。
 
@@ -475,6 +516,99 @@ async def _run_comparison(items: list[str], question: str, user_id: int,
     return compare_service.format_comparison(result)
 
 
+async def recommend(state: RagState, sink: TextSink, key: KeyRecord,
+                    session: AsyncSession) -> dict:
+    """执行推荐工具（A5）：按画像推荐**用户还没有的**商品。
+
+    四步（顺序不能换）：
+      ① 读画像      → profile_service（现成，0 成本）
+      ② 画像→搜索词  → recommend_service（1 次主模型）
+                     🔴 **这一步是隐私红线的关键**：模型必须把画像**抽象成
+                        商品特征**，绝不能把用户的具体商品/订单原样发给博查
+      ③ 搜候选      → web_search（花钱，≤3 次）
+      ④ 提参 + 排序 → compare_specs_service + 1 次主模型
+
+    🔴 **失败不抛异常**，转成给模型看的文本（同 search / compare 节点的口径）。
+    """
+    calls = state.get("tool_calls") or []
+    new_messages: list[dict] = []
+    user_id = state["user_id"]
+
+    sink.write_agent("A5", "start", "正在根据你的偏好推荐")
+    try:
+        for call in calls:
+            question = str(call.parsed_arguments().get("question") or "").strip()
+            text = await _run_recommendation(question, user_id, key, session)
+            new_messages.append({
+                "role": "tool", "tool_call_id": call.id, "content": text,
+            })
+    finally:
+        sink.write_agent("A5", "end")
+
+    return {"messages": new_messages,
+            "recommend_rounds": state.get("recommend_rounds", 0) + 1,
+            "tool_calls": []}
+
+
+async def _run_recommendation(question: str, user_id: int, key: KeyRecord,
+                              session: AsyncSession) -> str:
+    """四步推荐流程，返回给模型看的文本。**永不抛异常**。"""
+    # ① 读画像（现成能力，0 成本）
+    try:
+        profile_text = await profile_service.load_profile_context(user_id, session)
+    except Exception:
+        logger.warning("读画像失败", exc_info=True)
+        profile_text = ""
+
+    # ② 画像 → 搜索词（🔴 隐私抽象发生在这里）
+    searches = await recommend_service.build_searches(profile_text, question, key)
+    if not searches and question:
+        #降级：搜词生成失败就直接用用户问题搜
+        # ⚠️ 风险：用户问题里可能带商品偏好（「买索尼降噪耳机」）——
+        #   那是他自己主动说的，发给搜索服务**不算隐私泄露**（用户已授权）
+        searches = [question]
+    if not searches:
+        return ("无法生成搜索词，没法推荐。请直接告诉用户："
+                "我需要知道你想要什么方向的商品。")
+
+    # ③ 搜候选（花钱）
+    try:
+        names = await recommend_service.search_candidates(searches)
+    except Exception:
+        logger.warning("搜索候选异常", exc_info=True)
+        names = []
+    if not names:
+        return ("联网搜索没找到相关商品。请直接说明这个情况，"
+                "**不要编造商品或价格**。")
+
+    # ④ 提参 + 排序（提参复用 A4 的能力）
+    try:
+        specs = await compare_specs_service.fetch_specs(names, user_id, session)
+    except Exception:
+        logger.warning("推荐取参异常", exc_info=True)
+        specs = {}
+    if not specs:
+        return ("找到了候选商品但没能获取到参数。"
+                "请直接说明情况，**不要编造参数**。")
+
+    try:
+        raw, _model, _tc = await model_call.call_model(
+            key, recommend_service.build_rank_prompt(
+                profile_text, question, specs))
+    except Exception as exc:
+        logger.warning("排序 prompt 失败", exc_info=True)
+        return (f"已获取到候选商品参数（{'、'.join(specs)}），"
+                f"但排序失败（{type(exc).__name__}）。")
+
+    rankings = recommend_service.parse_ranking(raw, list(specs))
+    if not rankings and specs:
+        # 排序结果全被过滤掉了（模型编造了不存在的商品名）——
+        # 至少把候选给模型，别让它空手而归
+        logger.warning("排序结果全被过滤，回落为按候选原样给出")
+        rankings = [{"name": n, "reason": ""} for n in specs]
+    return recommend_service.format_recommendation(rankings, specs)
+
+
 def route(state: RagState) -> str:
     """按**工具名**分派到对应节点；没有工具调用 → END。
 
@@ -490,7 +624,12 @@ def route(state: RagState) -> str:
     calls = state.get("tool_calls") or []
     if not calls:
         return END
-    return "compare" if calls[0].name == COMPARE_TOOL_NAME else "search"
+    name = calls[0].name
+    if name == COMPARE_TOOL_NAME:
+        return "compare"
+    if name == RECOMMEND_TOOL_NAME:
+        return "recommend"
+    return "search"
 
 
 def build_graph(key: KeyRecord, sink: TextSink):
@@ -513,17 +652,24 @@ def build_graph(key: KeyRecord, sink: TextSink):
         async with async_session_local() as session:
             return await compare(state, sink, key, session)
 
+    async def node_recommend(state: RagState) -> dict:
+        async with async_session_local() as session:
+            return await recommend(state, sink, key, session)
+
     g = StateGraph(RagState)
     g.add_node("decide", node_decide)
     g.add_node("search", node_search)
     g.add_node("compare", node_compare)
+    g.add_node("recommend", node_recommend)
     g.add_edge(START, "decide")
     # 🔴 映射表里的 END 是 `langgraph.graph.END`（值是 '__end__'），
     #   route 必须 return **这个常量**而不是字符串 "END"——
     #   我实测过：返回字符串 "END" 会抛 `KeyError: 'END'`（探针踩过）。
     g.add_conditional_edges(
         "decide", route,
-        {"search": "search", "compare": "compare", END: END})
+        {"search": "search", "compare": "compare",
+         "recommend": "recommend", END: END})
     g.add_edge("search", "decide")
     g.add_edge("compare", "decide")
+    g.add_edge("recommend", "decide")
     return g.compile()

@@ -66,6 +66,12 @@ def no_paid_calls(monkeypatch):
                 for n in items}
 
     async def fake_call_model(key, messages, **kw):
+        system = messages[0].get("content") or ""
+        # 🔴 按 system prompt 分流：A4 对比 / A5 排序 / A5 搜词
+        if "排序" in system:
+            return (json.dumps({"items": [
+                {"name": "索尼 WH-1000XM5", "reason": "他偏好续航"}]},
+                ensure_ascii=False), "fake-model", [])
         return (json.dumps({
             "dimensions": [{"name": "重量", "values": {"a": "250g", "b": "61g"},
                             "winner": "b"}],
@@ -229,3 +235,86 @@ def test_limits_are_separate_per_tool():
     assert a1.MAX_SEARCH_ROUNDS == 2
     assert a1.MAX_COMPARE_ROUNDS == 1
     assert a1.MAX_SEARCH_ROUNDS != a1.MAX_COMPARE_ROUNDS
+
+# ---------- 5. A5 recommend 节点（阶段 4） ----------
+
+def test_route_dispatches_recommend():
+    """🔴 route 必须认识第三个工具（加 recommend 时忘了改就会漏）。"""
+    rec = _call(a1.RECOMMEND_TOOL_NAME, {"question": "推荐个耳机"})
+    assert a1.route({"tool_calls": [rec]}) == "recommend"
+
+
+def test_recommend_is_separate_counter():
+    """🔴 锁「推荐有自己的次数上限」。
+
+    推荐比检索贵得多（0.1-0.2 元 vs 0 元），不能共用检索的额度。
+    """
+    assert a1.MAX_RECOMMEND_ROUNDS == 1
+    assert a1.MAX_RECOMMEND_ROUNDS != a1.MAX_SEARCH_ROUNDS
+
+
+def test_recursion_limit_covers_three_tools():
+    """🔴 三种工具的最坏路径。
+
+    实测（2026-10-18 探针）：检索2 + 对比1 + 推荐1 = 9 次节点执行，
+    **limit=9 撞，10 才通** —— END 那一跳也算一步。
+    """
+    steps = 2 * (a1.MAX_SEARCH_ROUNDS + a1.MAX_COMPARE_ROUNDS
+                 + a1.MAX_RECOMMEND_ROUNDS) + 1
+    assert steps == 9, "公式变了要同步更新这个断言"
+    assert a1.RECURSION_LIMIT >= steps + 1, (
+        "RECURSION_LIMIT=%d 连 END 那一步都不够（需要 %d）"
+        % (a1.RECURSION_LIMIT, steps + 1))
+
+
+@pytest.fixture(autouse=True)
+def mock_recommend_deps(monkeypatch):
+    """🔴 挡 recommend 节点用到的全部花钱依赖。"""
+    async def fake_profile(user_id, session):
+        return "用户偏好：长续航降噪"
+
+    async def fake_searches(profile_text, question, key):
+        return ["降噪耳机 长续航"]
+
+    async def fake_candidates(searches):
+        return ["索尼 WH-1000XM5"]
+
+    async def fake_specs(items, user_id, session):
+        return {n: {"name": n, "price": 2299, "specs": {"重量": "254g"}}
+                for n in items}
+
+    async def fake_rank(key, messages, **kw):
+        return (json.dumps({"items": [
+            {"name": "索尼 WH-1000XM5", "reason": "他偏好续航"}]},
+            ensure_ascii=False), "m", [])
+
+    monkeypatch.setattr(a1.profile_service, "load_profile_context", fake_profile)
+    monkeypatch.setattr(a1.recommend_service, "build_searches", fake_searches)
+    monkeypatch.setattr(a1.recommend_service, "search_candidates", fake_candidates)
+    monkeypatch.setattr(a1.compare_specs_service, "fetch_specs", fake_specs)
+    #🔴 **不要再 mock 一次 call_model**：上面 no_paid_calls 已经 mock 了它，
+    #    两个 autouse fixture 里**后定义的那个会覆盖前面的**，
+    #    于是这里返回的是 no_paid_calls 的「搜词 JSON」而不是排序结果，
+    #    表现为「排序结果全被过滤」。
+    #    正确做法：让 no_paid_calls 的 fake_call_model **认得出这是排序那一步**。
+    #    （改 no_paid_calls 的 fake 比重叠定义可靠——一个桩，一处口径。）
+
+
+async def test_recommend_node_emits_agent_events():
+    """🔴 前端要显示「正在根据你的偏好推荐」→ start / end 必须成对。"""
+    sink = a1.TextSink()
+    call = _call(a1.RECOMMEND_TOOL_NAME, {"question": "推荐个耳机"})
+    out = await a1.recommend(_state([call]), sink, _key(), _FakeSession())
+    assert [ev["phase"] for ev in sink._agents] == ["start", "end"]
+    assert out["recommend_rounds"] == 1
+    assert sink._agents[0]["name"] == "A5"
+
+
+async def test_recommend_node_returns_text_to_model():
+    """recommend 节点必须返回一段给 decide 看的文本（含推荐理由）。"""
+    sink = a1.TextSink()
+    call = _call(a1.RECOMMEND_TOOL_NAME, {"question": "推荐个耳机"})
+    out = await a1.recommend(_state([call]), sink, _key(), _FakeSession())
+    text = out["messages"][-1]["content"]
+    assert "索尼 WH-1000XM5" in text
+    assert "偏好续航" in text
