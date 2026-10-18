@@ -55,17 +55,67 @@ from app.services.api_key_service import KeyRecord
 
 logger = logging.getLogger(__name__)
 TOOL_NAME = "search_my_items"
-MAX_ROUNDS = 2
-# 🔴 实测（2026-10-18）：MAX_ROUNDS=2 时**5会撞 GraphRecursionError，6 才通**。
-#   序列是：
-#       START → decide(1) → search(2) → decide(3) → search(4) → decide(5) → END(6)
-#                3 次 decide + 2 次 search + START + END = 6
-#   漏掉的是**最后一次 decide**——round_no 满的那轮它仍要执行一次才能返回 END。
-#   （2026-10-17 我写过「别按轮数直觉估」，当天自己又估错了。）
+COMPARE_TOOL_NAME = "compare_items"
+MAX_COMPARE_ITEMS = 3      # 🔴 大宋 22:40 拍板：对比最多 3 件
+
+# 🔴 每种工具的次数上限。**分开计数**，不用一个 MAX_ROUNDS：
+#   - 检索不花钱（用用户自己的 embedding key），所以可以多来几次
+#   - 对比要联网（3 次博查 ≈ 0.108 元），所以卡死
+#   混成一个数字的话，以后加「花钱的工具」就没法单独限了。
+MAX_SEARCH_ROUNDS = 2
+MAX_COMPARE_ROUNDS = 1
+
+# 🔴 实测（2026-10-18，加compare 节点后重新实测）：
+#   最坏路径 = 检索 2 次 + 对比 1 次 + 收尾的 decide：
+#       START → decide(1) → search(2) → decide(3) → search(4)
+#            → decide(5) → compare(6) → decide(7) → END
+#       **limit=5 撞 GraphRecursionError，6 也撞，7 才通。**
 #
-#   多留 2 的余量：撞上了是抛异常→流断→用户看到「生成失败」；
-#   多留只是可能多跑一轮 decide（拿到工具次数上限后会自动给答案），代价小得多。
-RECURSION_LIMIT = (MAX_ROUNDS + 1) * 2 + 2
+#   🔴 我原来的公式 `(MAX_ROUNDS+1)*2+2` 算出来的 8 是**错的**——实测 8 通、7 也通，
+#      说明真正需要的是 7。多留 1 变成 8 属于保守余量，能用，但**理由得写对**。
+#
+#   🔴 **两次都算错的教训**（2026-10-17 按轮数×2 算 5；这次按边数算 8）：
+#      **`START` 不算super-step**，只有节点执行才算。
+#      所以公式是「节点执行次数」而不是「边数」或「轮数×2」：
+#          总节点执行 = decide 次数 + 工具节点次数
+#          decide 次数 = 工具次数 + 1（最后一次它要返回 END）
+#          节点执行 = 2×工具次数 + 1
+#      最坏情况 = 2×(MAX_SEARCH + MAX_COMPARE) + 1 = 2×3+1 = 7
+#   🔴 **改这个数必须重新实测**，别信公式——公式只是给你算个起点。
+RECURSION_LIMIT = 2 * (MAX_SEARCH_ROUNDS + MAX_COMPARE_ROUNDS) + 1 + 1
+#                                          ^+1 是保守余量
+
+COMPARE_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": COMPARE_TOOL_NAME,
+        "description": (
+            "对比 2-3 件商品的参数差异，**按用户当前问题的重点给出分维度对比**"
+            "（例如用户问「戴久了耳朵不难受」就对比重量与佩戴压力，"
+            "而不是泛泛比降噪）。当用户明确要比较几件商品时调用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                # 🔴 question 必须 required（大宋 22:50 定）：
+                #    「维度按用户问题定」是A4 的核心，没有它这个工具就没意义。
+                #    模型漏填时降级成「按品类对比」（见 compare 节点）。
+                "question": {
+                    "type": "string",
+                    "description": "用户真正想比较的方面，用他自己的话概括",
+                },
+                "items": {
+                    "type": "array",
+                    "description": f"要对比的商品名称，最多 {MAX_COMPARE_ITEMS} 件",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                    "maxItems": MAX_COMPARE_ITEMS,
+                },
+            },
+            "required": ["question", "items"],
+        },
+    },
+}]
 
 SEARCH_TOOL = [{
     "type": "function",
@@ -180,9 +230,13 @@ class RagState(TypedDict, total=False):
     """
     messages: Annotated[list, _append_messages]
     user_id: int
-    round_no: int
     tool_calls: list# decide 交下来的待执行工具调用
     answer: str           # 最终回答全文
+    # 🔴 每种工具**各自**的调用次数（2026-10-18 从单个 round_no 拆开）。
+    #   为什么要拆：检索不花钱（用户自己的 embedding key），对比要联网（≈0.108 元）。
+    #   一个数字管全部的话，对比会占检索的额度或者反过来。
+    search_rounds: int
+    compare_rounds: int
 
 
 # 🔴 没配向量模型时，工具仍要定义，但 description 明说不可用。
@@ -212,27 +266,41 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     A1 的职责是「判断用户这句话该交给谁」——`decide` 做的正是这件事：
     读对话 → 问模型「要不要调工具、调哪个」→ 按模型的 tool_calls 分发到对应节点。
 
-    **目前只有一个工具**（`search_my_items`）；加compare / recommend / card 时
-    只需要往 `tools` 列表里追加，路由逻辑（`route`）不用改——
-    它只认「有没有 tool_calls」，不认具体是哪个工具。
-
     流式产出：文本增量写进 sink；工具调用收齐后放进 state。
     """
     messages = state["messages"]
-    round_no = state.get("round_no", 0)
     user_id = state["user_id"]
+    search_rounds = state.get("search_rounds", 0)
+    compare_rounds = state.get("compare_rounds", 0)
 
-    # 🔴 次数满了就**不给工具定义** —— 模型看不到工具就只能直接回答。
-    #   这是「业务收尾」，与 recursion_limit（死循环兜底）职责不同。
-    can_search = round_no < MAX_ROUNDS
+    # 🔴 **每个工具单独判次数**（2026-10-18 加compare 时改的）。
+    #   之前是「一个 MAX_ROUNDS 管所有工具」，现在必须分开——因为
+    #   **检索不花钱（用用户自己的 embedding key），对比要联网（3 次博查 ≈ 0.108 元）**。
+    #   混成一个数字的话，对比会白占检索的额度、或者反过来。
+    #
+    #   次数满了就把那个工具从定义里拿掉 —— 模型看不到它就只能走别的路
+    #   或直接回答。**这是「业务收尾」，与 recursion_limit（死循环兜底）职责不同。**
+    can_search = search_rounds < MAX_SEARCH_ROUNDS
+    can_compare = compare_rounds < MAX_COMPARE_ROUNDS
     has_key = await rag_service.has_embedding_key(user_id, session)
-    tools = SEARCH_TOOL if (can_search and has_key) else _DISABLED_TOOL
+
+    tools: list[dict] = []
+    if can_search:
+        # 🔴 没配向量模型时仍要定义，但 description 明说不可用 ——
+        #   「模型看不到工具时会自己编参数格式，而『调了必然失败 → 模型
+        #   输出检索失败 → 然后编一个答案』比『明说没有检索能力』更糟」。
+        tools.append(SEARCH_TOOL[0] if has_key else _DISABLED_TOOL[0])
+    if can_compare:
+        tools.append(COMPARE_TOOL[0])
+    # ⚠️ tools 为空时传None（模型调用层会当「不带工具」）——
+    #   传 [] 有些厂商会当成「有一个空工具列表」而报错。
 
     pending: list[model_call.ToolCall] = []
     answer_parts: list[str] = []
     # 🔴 模型调用失败**往上抛**，让 LangGraph 报错，由 chat_stream 转成「生成失败」。
     #   这里**不要吞** —— 这是本次请求的失败，不是可降级的旁支。
-    async for event in model_call.stream_model(key, messages, tools=tools):
+    async for event in model_call.stream_model(key, messages,
+                                               tools=tools or None):
         if event.kind == "text":
             answer_parts.append(event.text)
             sink.write(event.text)
@@ -298,13 +366,86 @@ async def search(state: RagState, session: AsyncSession) -> dict:
         })
 
     return {"messages": new_messages,
-            "round_no": state.get("round_no", 0) + 1,
+            "search_rounds": state.get("search_rounds", 0) + 1,
+            "tool_calls": []}
+
+
+async def compare(state: RagState, sink: TextSink, session: AsyncSession) -> dict:
+    """执行对比工具（A4）：把结果作为 role="tool" 消息追加进 messages。
+
+    🔴 **本阶段只做「取出参数 → 生成占位结果」**（2026-10-18）。
+    真正的联网取参（`web_search` + `complete_specs`）在阶段 3 做 ——
+    那是三段式里唯一要花钱的部分，单独一步更可控，也便于单独测。
+
+    **但维度选择已经在这里定型了**：从 `tool_calls[].parsed_arguments()["question"]`
+    拿用户问题（大宋 22:50 定的路径）—— 不翻 messages，因为参数里已经有
+    **模型提炼过的意图**（比用户原话更聚焦）。见 docs/A4对比与A5推荐-设计.md §2.2。
+
+    🔴 **失败不抛异常**，转成给模型看的文本（同 search 节点的口径）。
+    """
+    calls = state.get("tool_calls") or []
+    new_messages: list[dict] = []
+
+    #🔴 让前端显示「正在对比…」。start / end 都显式写——
+    #   自动配对会在节点抛异常时漏掉 end，前端就永远转圈（见 TextSink 注释）。
+    sink.write_agent("A4", "start", "正在对比商品参数")
+    try:
+        for call in calls:
+            args = call.parsed_arguments()
+            question = str(args.get("question") or "").strip()
+            items = [str(x).strip() for x in (args.get("items") or []) if str(x).strip()]
+
+            # 🔴 三件上限在**这里**再兜一次，不只靠工具定义的 maxItems。
+            #   模型有时会无视 maxItems 直接给 4 个——而 4 个 = 多 1 次博查（0.036 元）。
+            #   **不静默截断**：截了要让模型知道，否则它会以为比了 4 件。
+            if len(items) > MAX_COMPARE_ITEMS:
+                dropped = items[MAX_COMPARE_ITEMS:]
+                items = items[:MAX_COMPARE_ITEMS]
+                logger.warning("对比商品超上限，截断：丢掉 %s", dropped)
+
+            if len(items) < 2:
+                text = ("对比失败：至少需要 2 件商品才能比较，"
+                        "你只提供了 %d 件。请让用户明确要比较哪几件。" % len(items))
+            elif not question:
+                # 🔴 question 为空 → **降级**而不是报错。
+                #   「维度按用户问题定」是A4 的核心，但模型漏填时
+                #   退化到「按品类对比」远好过整个对比失败。
+                #   （见 docs/A4对比与A5推荐-设计.md §2.2 的三道保险）
+                logger.info("compare 未拿到 question，降级为按品类对比")
+                text = (f"请按【商品品类】的通用关键参数对比这几件：{'、'.join(items)}。"
+                        f"（用户没有明确说明关注点，按品类通用维度对比。）")
+            else:
+                # 📌 阶段 3 在这里换成：联网取参 + 分维度对比
+                text = (f"待对比：{'、'.join(items)}；用户关注：{question}。"
+                        "（参数获取与维度对比尚未接入，见 docs/A4对比与A5推荐-设计.md）")
+
+            new_messages.append({
+                "role": "tool", "tool_call_id": call.id, "content": text,
+            })
+    finally:
+        sink.write_agent("A4", "end")
+
+    return {"messages": new_messages,
+            "compare_rounds": state.get("compare_rounds", 0) + 1,
             "tool_calls": []}
 
 
 def route(state: RagState) -> str:
-    """有工具调用 → search，没有 → END。"""
-    return "search" if state.get("tool_calls") else END
+    """按**工具名**分派到对应节点；没有工具调用 → END。
+
+    🔴 **2026-10-18 改**：原来只有一种工具时写死 `return "search"`。
+       加了 compare 之后必须按名字分——否则 compare 的 tool_call
+       会被扔进 search 节点，去检索「索尼WH-1000XM5」这个字符串。
+
+    ⚠️ 拿到**不认识**的工具名时回落到 `search` 而不是报错：
+       模型偶尔会幻觉出工具名，让它走一次检索比中断整轮对话好。
+       （真要严格校验应该在这里抛，但那就得先确认所有厂商的模型
+       都会严格遵守 tools 定义——没验证过，先用宽松口径。）
+    """
+    calls = state.get("tool_calls") or []
+    if not calls:
+        return END
+    return "compare" if calls[0].name == COMPARE_TOOL_NAME else "search"
 
 
 def build_graph(key: KeyRecord, sink: TextSink):
@@ -323,10 +464,21 @@ def build_graph(key: KeyRecord, sink: TextSink):
         async with async_session_local() as session:
             return await search(state, session)
 
+    async def node_compare(state: RagState) -> dict:
+        async with async_session_local() as session:
+            return await compare(state, sink, session)
+
     g = StateGraph(RagState)
     g.add_node("decide", node_decide)
     g.add_node("search", node_search)
+    g.add_node("compare", node_compare)
     g.add_edge(START, "decide")
-    g.add_conditional_edges("decide", route, {"search": "search", END: END})
+    # 🔴 映射表里的 END 是 `langgraph.graph.END`（值是 '__end__'），
+    #   route 必须 return **这个常量**而不是字符串 "END"——
+    #   我实测过：返回字符串 "END" 会抛 `KeyError: 'END'`（探针踩过）。
+    g.add_conditional_edges(
+        "decide", route,
+        {"search": "search", "compare": "compare", END: END})
     g.add_edge("search", "decide")
+    g.add_edge("compare", "decide")
     return g.compile()
