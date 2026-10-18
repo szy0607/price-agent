@@ -231,6 +231,21 @@ export function listConversationMessages(conversationId, limit = 200) {
   return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`)
 }
 
+/**
+ * RAG 索引状态 —— 对话页那条提示的数据源（2026-10-18）。
+ *
+ * 静态路径 `/rag-index-status` 与 `/{conversationId}/messages` 同前缀，
+ * 但实测 FastAPI 按段匹配（静态段优先于动态段），**声明顺序不影响**。
+ *
+ * @returns {Promise<{code:number,msg:string,data:{has_key:boolean,pending:number,retrievable:boolean}}>}
+ *   has_key     用户是否配了可用的向量模型
+ *   pending     三张表里「还没 SYNCED」的行数合计
+ *   retrievable 检索完全可用（配了 key 且没有待索引）
+ */
+export function getRagIndexStatus() {
+  return apiRequest('/conversations/rag-index-status')
+}
+
 export function listPurchaseRecords() {
   return apiRequest('/purchase-records')
 }

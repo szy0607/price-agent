@@ -1,12 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { PhArchive, PhChatsCircle, PhCpu, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhChatsCircle, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import ItemChip from '../components/ItemChip.vue'
 import ItemRow from '../components/ItemRow.vue'
 import { marked } from 'marked'
-import { listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage } from '../utils/api'
+import { getRagIndexStatus, listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage } from '../utils/api'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -38,12 +38,36 @@ function parseUserContent(content) {
   return { refs, text: rest.slice(cut + 2) }
 }
 
-// 消息统一结构 { id, role, text, refs, model, status }：历史加载与乐观上屏走同一形状，
-// 否则同一条消息刷新前后显示不一致（乐观上屏没有商品块文本）
+// 🔴 role="assistant" 但 content 存的是 tool_calls JSON 时，不能当普通文本渲染。
+//    判定方式：content 能被解析成 {tool_calls: [...]}。解析失败就当普通文本
+//    （与 parseUserContent「拆不动就整体当纯文本」同口径——一条坏消息不该让会话白屏）。
+function parseToolCallContent(content) {
+  if (typeof content !== 'string' || !content.startsWith('{')) return null
+  try {
+    const data = JSON.parse(content)
+    return Array.isArray(data?.tool_calls) ? data.tool_calls : null
+  } catch {
+    return null
+  }
+}
+
+// 消息统一结构 { id, role, text, refs, model, status, toolCalls, toolMeta }：
+// 历史加载与乐观上屏走同一形状，否则同一条消息刷新前后显示不一致
+//（乐观上屏没有商品块文本）
 function toMessage(row) {
   if (row.role === 'user') {
     const { refs, text } = parseUserContent(row.content)
     return { id: row.id, role: row.role, text, refs, model: null, status: row.status ?? 'completed' }
+  }
+  // 🔴 tool 消息：content 是「检索到 N 件」文本 + 前面的 assistant 已经有 tool_calls，
+  //    所以这里不单独渲染任何东西，返回空壳让模板跳过。
+  //    这么做是刻意的：**同一个信息不显示两遍**。
+  if (row.role === 'tool') {
+    return { id: row.id, role: row.role, text: '', refs: [], model: null, status: row.status ?? 'completed', isToolResult: true }
+  }
+  const toolCalls = parseToolCallContent(row.content)
+  if (toolCalls) {
+    return { id: row.id, role: row.role, text: '', refs: [], model: null, status: row.status ?? 'completed', toolCalls }
   }
   return { id: row.id, role: row.role, text: row.content, refs: [], model: row.model ?? null, status: row.status ?? 'completed' }
 }
@@ -109,6 +133,49 @@ function removeRef(src, id) { selectedRefs.value.delete(refKey(src, id)) }
 
 function scrollToBottom() {
   nextTick(() => { if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight })
+}
+
+// ---------- RAG 索引状态提示（2026-10-18，大宋拍板：提示放对话页，不放商品列表） ----------
+// 三种状态对应三种文案，**正常时完全不显示**——不显示才是「一切正常」的样子，
+// 挂个「✅ 一切正常」的绿色条反而是噪音。
+// 🔴 为什么 index_status 不进 prompt、也不显示具体商品：那是内部技术状态
+//    （模型看到会当事实复述给用户），用户只需要知道「检索可能不全」。
+const ragNotice = ref('')
+
+// tool 调用的展开状态：key 是 message.id。**故意用对象而不是 Set** ——
+// Vue 3 的 ref 对 Set 的深层响应式支持要靠 reactive 包裹，用普通对象更直接可控。
+const toolExpanded = ref({})
+
+// 从 tool_call 的 arguments（JSON 字符串）里取出 query 展示。
+// 🔴 必须 try/catch：arguments 是模型生成的，可能不是合法 JSON（截断/幻觉）。
+//    解析失败显示原始字符串的前 40 个字符——一条坏数据不该让整个会话白屏
+//    （与 parseUserContent「拆不动就整体当纯文本」同口径）。
+function toolCallQuery(tc) {
+  try {
+    const args = JSON.parse(tc.function?.arguments || '{}')
+    return args.query ?? '(空)'
+  } catch {
+    return String(tc.function?.arguments ?? '').slice(0, 40)
+  }
+}
+
+async function loadRagStatus() {
+  try {
+    const res = await getRagIndexStatus()
+    const data = res?.data
+    if (!data) { ragNotice.value = ''; return }
+    if (!data.has_key) {
+      ragNotice.value = '未配置向量模型，检索增强未启用'
+    } else if (data.pending > 0) {
+      ragNotice.value = `向量库正在更新中（${data.pending} 件待处理），检索结果可能不完整`
+    } else {
+      ragNotice.value = ''
+    }
+  } catch {
+    // 🔴 查不到就当没有提示。**不能让这个可选功能拖垮整个对话页**——
+    // 与 rag_service 的降级口径一致：向量库的问题不该让主功能失败。
+    ragNotice.value = ''
+  }
 }
 
 async function loadConversations() {
@@ -286,7 +353,7 @@ onBeforeUnmount(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadConversations(), loadPickerItems()])
+  await Promise.all([loadConversations(), loadPickerItems(), loadRagStatus()])
 })
 </script>
 
@@ -331,6 +398,11 @@ onMounted(async () => {
         </div>
       </header>
 
+      <!-- RAG 索引状态提示：正常时 v-if 为 false完全不显示（不显示 = 一切正常） -->
+      <p v-if="ragNotice" class="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 sm:px-7 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        {{ ragNotice }}
+      </p>
+
       <div v-if="conversations.length > 1" class="border-b border-zinc-200 px-4 py-2 md:hidden dark:border-zinc-800">
         <select :value="activeConversationId ?? ''" aria-label="选择会话" class="h-9 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" :disabled="sending" @change="openConversation(Number($event.target.value))">
           <option value="" disabled>新咨询</option>
@@ -348,13 +420,33 @@ onMounted(async () => {
         <template v-else>
           <div class="mx-auto max-w-3xl space-y-5">
             <div v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-              <div class="max-w-[85%] break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">
+              <!-- 🔴 role="tool" 不渲染任何东西：它与它前面那条 assistant(tool_calls)
+                   是同一个信息（检索到什么），显示两遍是噪音。
+                   保留这行占位是为了 v-for 的 key 稳定、且留出将来单独展示的空间。 -->
+              <template v-if="message.role === 'tool'"><span class="hidden" aria-hidden="true"></span></template>
+              <div v-else class="max-w-[85%] break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">
                 <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
                   <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
                 </div>
+                <!-- 🔴 工具调用提示：一行可展开（2026-10-18，大宋定的形态）。
+                     存在意义：用户刷新后要看得见「系统翻了我的物品库」——
+                     不显示就是**凭空给出一个答案**，用户不知道依据是什么（信任问题）。 -->
+                <p v-if="message.toolCalls && message.toolCalls.length" class="mb-2">
+                  <button type="button" class="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent dark:text-zinc-400" @click="toolExpanded[message.id] = !toolExpanded[message.id]">
+                    <PhMagnifyingGlass :size="13" weight="duotone" class="shrink-0" />
+                    <span>已检索你的物品库{{ toolExpanded[message.id] ? '' : `（${message.toolCalls.length} 次调用）` }}</span>
+                    <span class="text-[10px]">{{ toolExpanded[message.id] ? '收起' : '展开' }}</span>
+                  </button>
+                  <span v-if="toolExpanded[message.id]" class="mt-1.5 block space-y-1 border-l-2 border-zinc-200 pl-2.5 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                    <span v-for="tc in message.toolCalls" :key="tc.id" class="block break-all">
+                      {{ tc.function?.name || 'tool' }}(
+                      <span class="font-mono">{{ toolCallQuery(tc) }}</span>)
+                    </span>
+                  </span>
+                </p>
                 <!-- 🔴 没有文本且status='streaming' = 占位气泡。meta 到首个 delta 之间
                      有 1~3 秒空窗，这段时间渲染成「正在思考…」，不能白屏（设计文档 §6.5） -->
-                <span v-if="message.role === 'assistant' && !message.text" class="text-zinc-400">
+                <span v-if="message.role === 'assistant' && !message.text && !(message.toolCalls && message.toolCalls.length)" class="text-zinc-400">
                   {{ message.status === 'streaming' ? '正在思考…' : '' }}
                   <span v-if="message.status === 'streaming'" class="ml-0.5 inline-block animate-pulse">▍</span>
                 </span>
