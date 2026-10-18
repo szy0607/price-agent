@@ -180,6 +180,17 @@ async def persist_graph_messages(
             tcid = msg.get("tool_call_id")
             if tcid in pending_tool_ids:
                 pending_tool_ids.remove(tcid)
+        # 🔴 2026-10-18 补的分支：有正文但**没有 tool_calls** 的 assistant。
+        #    原来这个分支不存在（if / elif 都不匹配 → 整条消息被静默丢弃）。
+        #    什么时候会遇到：模型「先吐一句『让我查一下』→ 调工具」——
+        #    那句正文带 tool_calls（走上面分支）；但如果模型吐了正文后
+        #    **最终选择了直接回答**，就会走到这里。
+        #    后果不报错，只是那句话凭空消失 —— 用户看到自己刚被"说过"的话没了。
+        elif role == "assistant" and (msg.get("content") or "").strip():
+            row = await chat_repo.add_message(
+                user_id, conversation_id, "assistant", msg["content"], session,
+                model=model, status=chat_repo.STATUS_COMPLETED)
+            written.append(row.id)
 
     # 🔴 补占位：还有 tool_calls 没等到配对的 tool 消息（用户中途按停止）。
     #    不补的话下一轮 messages_for_context 会拼出**孤立的 tool_calls**，
