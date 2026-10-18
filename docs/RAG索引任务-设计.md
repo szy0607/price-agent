@@ -480,114 +480,198 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 
 ---
 
-## 8. RAG 读取侧如何用状态（**不改这部分，只定契约**）
+## 8. RAG 读取侧：检索位置与状态提示
 
-`rag_service.retrieve_relevant` 检索到 id 后回 MySQL 取原文时，**顺带取 `index_status`**：
+> 🔴 **2026-10-17 大宋撤回「固定前置」拍板，改为工具化。**
+> 本节 §8.1 / §8.2 的原结论已作废，下面是现行设计。
 
-| 状态 | 模型看到的 | 依据（00:36 大宋定的 6 条 prompt 规则） |
+### 8.0 拍板变更记录（保留决策留痕）
+
+| 时间 | 结论 | 为什么变 |
 |---|---|---|
-| `SYNCED` | 正常列参数 | 可以基于检索资料回答 |
-| `PENDING`/`RUNNING` | 「该商品正在建立向量索引」 | **明确告知处理中** |
-| `FAILED` | 「该商品暂时无法检索」 | 不说「商品不存在」 |
+| 2026-10-17 17:10 | ~~固定前置，不做模型自主判断~~ | 我给的成本对比（工具化多 1.5s） |
+| **2026-10-17 18:00** | **工具化（LangGraph）** | **大宋指出他一直要的是「让模型自己判断」，撤回上条** |
 
-**🔴 铁律复述**：**索引未完成 ≠ 商品不存在**。商品自身参数在 MySQL 里是完整的（`chat_service._format_item` 已经能直接读），向量化只是为了召回**其他**物品。**所以 PENDING 绝不能拦截请求，也不该报错。**
+**教训**：拍板当场就该写文档（已记）；**反过来也成立——写进文档的拍板，下一轮开工前必须跟大宋对一次**。
+拿文档当既定事实往下推是错的。
 
-**具体到 prompt**：
-```
-【语义检索到的相关物品】
-- 联想拯救者Y9000P｜品牌: 联想；型号: Y9000P（索引处理中）
-```
-——**写「索引处理中」而不是静默省略**。静默省略会让模型以为这件商品不存在。
+### 8.1 检索位置：**工具化**（大宋 18:05 撤回后拍板）
 
-### 8.1 检索位置的拍板：固定前置，**不做模型自主判断**
-
-> 2026-10-17 大宋拍板：**先跑通固定检索，工具化押后。**
-
-**大宋原本想的是「封装成工具，让模型自己判断要不要检索」（与 Yuxi 同设计）。
-我给了成本对比，他决定先用固定前置。** 账留着，将来重议时直接翻到这里：
+模型自己决定要不要调检索工具，走 **LangGraph 编排**（`app/agents/rag_graph.py`）。
 
 ```
-用户："送人送什么好"
-
-【固定前置 —— 本设计采用】
-  检索 366ms → 模型生成 3s
-  总计约 3.4 秒（不管该不该检索都一样）
-
-【工具化 —— 模型生成 tool_call 决定调不调】
-  第1轮模型决定（1.5s）
-    ├─ 要调 → 执行工具 366ms → 第2轮模型 3s = 约 4.9 秒
-    └─ 不调 → 直接答 1.5 秒
+START → decide ─┬─ 要检索 & round_no<2 → search ─┐
+                ├─ 不检索→ answer → END
+                └─ round_no>=2（兜底）   → answer → END
 ```
 
-| 场景 | 固定前置 | 工具化 | 差 |
+**与固定前置的对比账**（原17:10 我给的论据，现在只作对照）：
+
+|场景 | 固定前置 | 工具化 | 差 |
 |---|---|---|---|
-| 需要检索（认真问商品，**多数**） | 3.4s | 4.9s | 🔴 **慢 1.5 秒** |
-| 不需要检索（你好 / 谢谢，**少数**） | 3.4s | 1.5s | 🟢 快 1.9 秒 |
+| 需要检索（认真问商品，**多数**） | 3.4s | 4.9s | 🔴 慢 1.5s |
+| 不需要（你好/谢谢，**少数**） | 3.4s | 1.5s | 🟢 快 1.9s |
 
-**「让模型决定要不要检索」本身要花约 1.5 秒，而它省下的检索只有 0.366 秒——
-这笔账是亏的，亏约 4 倍。**
+**为什么最后还是选工具化**：大宋判断「你好/谢谢」这类不值得优化，而**用户看得到系统
+在翻他的物品库**是更重要的（见 §8.4）。固定前置在体验上「凭空给答案」。
 
-**检索耗时实测（2026-10-17 实测，千问 qwen3.7-text-embedding-flash）**：
+**检索耗时实测（2026-10-17，千问 qwen3.7-text-embedding-flash）**：
 
 | 步骤 | 耗时 | 占比 |
 |---|---|---|
-| ① 调 embedding 拿查询向量 | **335 ms** | **91%** |
-| ② PG 向量检索 | 31 ms | 8% |
+| ① 调 embedding 拿查询向量 | **335–470 ms** | **91%** |
+| ② PG 向量检索 | 31–35 ms | 8% |
 | ③ 回 MySQL 取原文 | ~5 ms | 1% |
-| **合计** | **366 ms** | |
 
-**所以优化方向也随之明确：要优化就优化 embedding 调用（占 91%），不是改编排结构。**
+🔴 **重要修正（实测否掉了我原来的推断）**：我曾以为「批量 6 条 363ms」是批量效应，
+实测**单条稳定 ~300ms，与条数几乎无关**（20 条也只有 695ms）——厂商侧约 250ms 固定开销。
+**所以「优化 embedding 调用」这条建议对读侧不成立**：读侧只有 1 条 query，没有第二条可批。
 
-### 8.2 什么时候该重议这个决定
+⚠️ **PG 那 31ms 也是固定的**（1 条数据和上万条一样快）——**PG 性能现在根本不是瓶颈**，
+语料上万条才是。
 
-| 信号 | 意味着该换工具化 |
-|---|---|
-| 语料涨到几千件，`top_k=5` 装不下 prompt | 该让模型自己挑 |
-| **首字延迟被真实用户抱怨**（不是我们推测的慢） | 换结构 |
-| 需要展示「子agent 正在被调用」这类过程 | 工具化的附带收益，值得付那 1.5 秒 |
+### 8.2 🔴 LangGraph 1.2.4 的三条硬约束（**全部实测，不是文档**）
 
-**这三条出现之前，固定前置是对的。**
-
-### 8.3 🔴 但「对话里的商品卡片」会推着走向工具化
-
-卡片是**另一个**功能（`docs/Agent编号约定.md` §5、§6），它需要「模型判断该不该弹卡片」
-——这与「模型判断该不该检索」是**同一类需求**。
-
-卡片一旦要做，多轮编排就绕不开（判断 → 可能查参数 → 渲染 → 确认入库），
-**届时 LangGraph 也就必须上**（项目现状：`langgraph` 已安装但全项目零引用）。两种顺序：
-
-| 顺序 | 步骤 | 适合 |
+| # | 约束 | 不这么写会怎样 |
 |---|---|---|
-| **本设计采用** | 先固定检索跑通 → 再定要不要工具化 | 想先看到效果 |
-| 另一种 | 卡片 + 检索一起上工具化 | 想一次做完 |
+| 1 | 默认 `recursion_limit`是 **10007**，不是网上说的 25 | 死循环 ≈ 4 小时 + 无限烧钱 |
+| 2 | **只能在 `ainvoke/astream` 的 `config` 里传**，`compile(recursion_limit=)` 不存在 | `TypeError: unexpected keyword argument` |
+| 3 | 递归计数是 **super-step** 不是「轮」：每轮 = decide+search+answer = 3 步 | 2 轮要设 6，设 4 会在半路截断 |
 
-**大宋 2026-10-17 选了前者。**
+**双保险**（业务控制 vs 死循环兜底）：
 
+| | 作用 | 撞满后 |
+|---|---|---|
+| 状态里的 `round_no` | **业务控制**：最多检索 2 次 | 主动走 answer，**正常回答** |
+| `recursion_limit=6` | **兜底**：防死循环 | 抛 `GraphRecursionError`，流断 |
+
+⚠️ 撞 `recursion_limit` 是**抛异常**，SSE 流会断在半路、用户看到「生成失败」。
+所以业务上必须靠 `round_no` 提前收尾，让上限永远撞不到。
+
+### 8.3 `index_status`：**不进 prompt**，只在对话页给一条提示
+
+**大宋 18:00 拍板**：状态提示**不在商品列表**，**在对话页单独一条**（「向量库正在更新中」）。
+
+| 出口 | 消费者 | 要什么 |
+|---|---|---|
+| 商品列表页 | 用户 | （**不做**，推翻原设计） |
+| **对话页顶部 banner** | 用户 | **一个布尔值**：有没有非 SYNCED 的行 |
+| **prompt** | 模型 | **什么都不给** |
+
+**🔴 为什么 `index_status` 不能进 prompt**（这一条与大宋的直觉相反，他一开始认为该进）：
+
+1. **模型会当事实复述** —— prompt 里写「苹果 iPhone（索引处理中）」，用户问「我的手机多少钱」，
+   模型很可能答「你的 iPhone 还在建立索引」。把内部技术状态漏给用户了，
+   违反 `chat_service.SYSTEM_PROMPT` 里「不得声称已经查询、验证」那条铁律。
+2. **对模型是纯噪音** —— 它对「这台手机适不适合送人」的判断毫无帮助，只占 token。
+3. **⚠️ 原设计混淆了两种情况**：
+   - **情况 A**：PG 里有向量，但 MySQL 里 `index_status=PENDING`（刚改完还没同步）→ 模型**会**看到它
+   - **情况 B**：PG 里没向量（PENDING 期间从没建过索引）→ 检索**根本命中不到**，模型压根看不到
+
+   原 §8 那句「写『索引处理中』而不是静默省略」只对情况 A 成立，而处理方式是**前端角标**，不是塞进 prompt。
+
+**所以 `rag_service` 不返回 `index_status` 给 prompt 用**——但 `fetch_items_for_rag`
+仍然带出这个字段，供两处用：写排查日志、写进落库的 tool 消息 JSON（前端展示）。
+
+**🔴 铁律复述（不变）**：**索引未完成 ≠ 商品不存在**。
+商品参数在 MySQL 里是完整的（`chat_service._format_item` 能直接读），向量化只是为了召回**其他**物品。
+**PENDING 绝不能拦截请求，也不该报错。**
+
+### 8.4 🔴 tool 消息：**落库**（方案 B，content 存 JSON）
+
+模型调工具时，返回值是 `role="tool"` 的消息——这是**协议要求**，没有它模型下一轮无法继续。
+
+**大宋拍板落库**，理由：**用户刷新页面后应当看得到「系统翻了我的物品库」**。
+不落的话用户看到的是一个**凭空出现的答案**，会怀疑「它凭什么推荐这个」——
+在导购场景下这是**信任问题**。
+
+**存储形态**（表结构一个字节都不改）：
+
+```
+id=100  role=user       content=「送人送什么好」
+id=101  role=assistant  content={"tool_calls":[{"id":"call_a1",...}]}  ← 存JSON（不是 NULL）
+id=102  role=tool       content={"query":"...","count":2,"items":[...]}← 存 JSON
+id=103  role=assistant  content=「推荐索尼耳机…」
+
+role: String(16)装得下 "tool"  ✅
+status: 复用 "completed"✅
+content: Text NOT NULL → 存 JSON 字符串刚好  ✅
+```
+
+**下一轮重建上下文时要还原成协议格式**（库里是 JSON 字符串，发给模型前必须转回去）：
+
+```
+{"role":"assistant", "content": null, "tool_calls":[...]}
+{"role":"tool", "tool_call_id":"call_a1", "content":"结果文本"}
+```
+
+⚠️ **不能直接把 JSON 字符串当 content 塞进去** —— 协议层等于没有工具调用记录。
+
+**🔴 成对落库是硬要求**：协议规定 assistant 发了 `tool_calls`，下一条必须是配对的
+`role="tool"`（带 `tool_call_id`），孤立会被厂商拒绝。
+
+**中断场景必然产生孤立**（`user → assistant(只发了 tool_calls) → [用户按停止]`）。
+**大宋拍板：中断也落 tool 占位**（content 写 `{"interrupted": true}`），保证永远成对。
+
+理由：「检索被中断有可能就是用户主动中断的」——用户自己知道是怎么回事，
+这不是内部状态泄露（推翻了我原先「内部状态不外露」的反对理由）。
+
+**为什么用 `status="completed"` 而不是 `failed`**：`status` 的既有语义是「生成结局」，
+检索**成功**了却标成失败是数据污染，会让以后查「failed 有多少」时捞出 tool 消息。
+代价是 `messages_for_context` 要**显式加 `role != "tool"` 条件**。
+
+### 8.5 降级：检索失败**永不抛异常**
+
+与写入侧 `index_service.drop_vector` 同口径——**Redis/PG 侧的失败不阻塞业务**。
+RAG 是增强功能，对话是主功能，让「向量库没配好」变成「用户发消息报 500」是本末倒置。
+
+| 失败点 | 抛出 | 用户看到 |
+|---|---|---|
+| 没配向量模型 key | `BizError` | banner「未配置向量模型」 |
+| PG 引擎没起 | `BizError` | banner「向量库未配置」 |
+| PG 连不上 / SQL 错 | asyncpg 异常 | 检索不到，但能正常聊 |
+
+**🔴 全异常自吞的代价**：它会把**代码 bug 一起吞掉**。
+2026-10-17 实测踩到：`rag_service` 调错了函数名（`fetch_items_for_refs`），
+一调必 `AttributeError`，但被 `except Exception` 吞掉 → **永远返回空列表，
+表现是「配好 key 也搜不出东西」且不报错**。
+
+**排查这类问题的第一件事：去看那条 `RAG 检索异常` 日志的完整堆栈**（`exc_info=True`）。
 ---
 
 ## 9. 施工顺序
 
-> **2026-10-17 17:10 更新**（大宋跑起来了，进度大幅前移）：
-> 第 1–8 步**全部完成**，端到端实测通过（千问 embedding 真调通，1024 维写入 PG，
-> `owned_item` 状态 SYNCED + `index_time` 有值；reaper dry-run 精确捞到 67 条）。
-> 当前在**第 9 步：读取侧**。
+> **2026-10-17 20:40 更新**：
+> 第 1–8 步全部完成（端到端实测通过）；**读取侧已改走工具化**（§8.1），
+> 原「固定前置」路线作废。步骤 9 拆成了 9a–9e。
 >
-> 已知遗留：`index_service.py` 有两处未使用的 import（第 15 行的 `datetime`、
-> 第 44 行函数体内的重复 import），不影响运行。
+> 已完成：`model_call` 支持 tools（含流式分片累积）、`rag_service`（检索 + 三处降级）、
+> `purchase_repo.fetch_by_ids`、`chat_repo.fetch_items_for_rag`。
+> 端到端实测：相关 query 召回 1 条、无关 query 被阈值挡成 0 条。
+>
+> 遗留已清：两处未使用 import、队列隔离（见步骤 10）。
 
 | # | 内容 | 状态 | 产出 /备注 |
 |---|---|---|---|
-| 1 | 三张表加 `index_status` / `index_time` + 迁移 | ✅ | `49a0c3b7f694`；autogenerate 正确生成了 server_default；67 行存量全回填 PENDING |
+| 1 | 三张表加 `index_status` / `index_time` + 迁移 | ✅ | `49a0c3b7f694`；67 行存量全回填 PENDING |
 | 2 | `config.py` 加 `redis_url` / `index_stale_seconds` + `app/core/redis_client.py` | ✅ | 🔴 `redis_url` 不给默认值（§14） |
 | 2.5 | `embedding_client.py` 四个异常类（可重试性分流） | ✅ | 见 §4.6 |
-| 3 | `app/services/index_service.py`：状态读写 + `enqueue_sync` + `reap_once` | ✅ |含 `drop_vector`（自吞异常） |
+| 3 | `app/services/index_service.py`：状态读写 + `enqueue_sync` + `reap_once` | ✅ | 含 `drop_vector`（自吞异常） |
 | 4 | `app/worker.py`：WorkerSettings + `on_startup` 起 PG | ✅ | 🔴 `functions`（单数会静默失效）/ `max_tries`（不是 RQ 的 `max_retries`） |
 | 5 | `sync_one` 五步 + 按异常类型分流 | ✅ | 🔴 PG 成功才 SYNCED |
 | 6 | **10 个** CRUD 入口接线（含 transfer **三表**、删除清副本） | ✅ | 最容易漏的一步，已全接 |
 | 7 | `app/worker_reaper.py`：每 5 分钟扫 | ✅ | 实测精确捞到 67 条 |
 | 8 | `main.py` lifespan 补 `close_pool()` | ✅ | — |
-| 9 | `rag_service.py` + `chat_service.prepare_chat` 接线（读取侧） | 🔵 **进行中** | §8 契约；**固定前置，不做模型自主判断**（§8.1） |
-| 10 | 启动文档补两条命令 | ✅ | `docs/启动命令.md` §6 已补，含「跑测试前先清队列」警告 |
+| 9a | `vector_repo` 相似度阈值（`rag_min_score`） | ✅ | 🔴 **实测发现原来没有阈值**，0.19 分的垃圾也召回 |
+| 9b | `model_call` 支持 tools + 流式 tool_call 分片累积 | ✅ | 产出改 `StreamEvent`；🔴 `[DONE]` 处必须 `break` 不能 `return` |
+| 9c | `rag_service.retrieve_relevant` + 三处降级 | ✅ | 端到端实测通过 |
+| 9d | `purchase_repo.fetch_by_ids` + `chat_repo.fetch_items_for_rag` | ✅ | 🔴 查不到必须**静默跳过**，与 refs 相反 |
+| 9e | 🔴 `app/agents/rag_graph.py`（LangGraph 状态图） | ⬜ **下一步** | `recursion_limit=6`（§8.2 三条约束） |
+| 9f | `chat_stream` 接编排 + `agent` 事件透传 | ⬜ | 现在 tool_call 事件被 warn 后丢弃 |
+| 9g | tool 消息落库（方案 B）+ `messages_for_context` 加 role 过滤 | ⬜ | §8.4 |
+| 9h | `GET /conversations/rag-index-status` | ⬜ | ⚠️ 必须声明在动态路径 `/{conversation_id}/` **之前** |
+| 9i | 前端：tool 消息渲染 + 对话页 banner | ⬜ | 归大宋 |
+| 10 | 测试队列隔离 + `scripts/clear_arq_queue.py` | ✅ | `arq:queue:pytest`，实测生产队列恒为 0 |
 
 **第 2、4、5、6 步各有一个「不报错但静默坏」的坑**，见 §11 自查清单。
 
@@ -649,15 +733,17 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 | # | 事项 | 说明 |
 |---|---|---|
 | 1 | 🟡 状态值大小写是否统一 | 本设计按拍板用大写；`chat_message.status` 是小写。改任一边要同步另一边 |
-| 2 | 📌 消费记录的分层不一致 | `create/update/delete_record` **直接写在 router 里，没有 repo 层**（其他两张表都有）。本设计不改造，只按 §5.1.1 接线。要不要补 repo 层另议 |
+| 2 | ✅ **消费记录已补 repo（只读）** | 2026-10-17 新建 `app/repository/purchase_repo.py`，只有 `fetch_by_ids`。**写侧仍在 router 里**（`_fields` / `_row_dict` / `_validate_specs` / `_owned_for_update` 五个私有函数）——本设计不改造。当前是**半分层**状态，有意为之的中间态 |
 | 3 | 🟡 切片是否含分组 | 现状 = `name + specs + note`（不含分组）。**保持现状**，别顺手加 |
 | 4 | 📌 Redis 在服务器上的部署 | 与服务器部署一并做（与流式设计 §2.5 的连接池待办一起） |
 | 5 | ✅ **`arq` / `redis` 已装** | 2026-10-17 实测 `pip show`：`arq 0.28.0`、`redis 5.3.1`；Redis 服务在跑（`redis_version=5.0.14.1`）。⚠️ **`requirements.txt` 还没同步**（只写了 `redis>=5.0`，**`arq` 完全没提**）—— 别人 clone 下来跑不了 worker |
 | 6 | ⚠️ **`arq` 已进入 maintenance-only** | PyPI 官方元数据：`arq 0.28.0`，作者声明仅维护、不计划新功能。**功能上够用**（异步任务/Retry/_job_id 去重/cron 都有）；风险是将来要优先级、结果面板得迁——**迁移成本低**（任务函数是普通 `async def`，只改 WorkerSettings 与投递那几行）。**不推翻 20:56 的拍板**，仅记录以备将来 |
 | 7 | ✅ **PG 已启动** | 2026-10-17 实测连通，`item_embedding` 可读写。infra 方案（WSL2 原生 / Docker）**仍是待决**——服务器部署时要一并定 |
 | 8 | ✅ `transfer_to_owned_item` 已返回元组 | 已改成 `return (owned_item, record)`，router 用 `record.id` 投递 purchase（§5.3） |
-| 9 | 🟡 **测试会污染生产 Redis 队列** | `tests/test_index_service.py` 里两处真调了 `enqueue_sync`；跑完测试再起 worker，会消费到测试造的假用户数据并**真调向量模型 API（花钱）**。已在 `docs/启动命令.md` §6 写警告，但**更稳的做法是给测试用独立的 Redis db 或队列名** |
-| 10 | 🟡 `index_service.py` 两处未使用的 import | 第 15 行 `from datetime import datetime`（文件里已不用）、第 44 行函数体内重复 import `get_current_time`。不影响运行，顺手清掉即可 |
+| 9 | ✅ **测试已与生产队列隔离** | 2026-10-17 解决：新增 `tests/conftest.py` 在 import app 前设 `ARQ_QUEUE_NAME=arq:queue:pytest`，`redis_client.get_pool()` 传 `default_queue_name` 给 `create_pool`。实测跑完 175 个测试，生产队列恒为 0。另加 `scripts/clear_arq_queue.py`（`--all` / `--dry-run`） |
+| 10 | ✅ 未使用 import 已全项目清理 | 2026-10-17 用 ast 扫了 97 个文件，清掉 9 处（`index_service` 两处 + `chat_message.JSON` + `image.Boolean/Text` + `owned_repo.delete` + `user_sche.Optional` + 测试里 4 处待大宋确认） |
+| 11 | 🔴 **`call_model` 返回值破坏性变更** | 2026-10-17 从 2 元组变 3 元组（加 `tool_calls`），`stream_model` 产出从 `str` 变 `StreamEvent`。顺手修出 `spec_complete_service` 的 10-16 遗留 bug——`POST /cart/items/ai-draft` 一直是坏的 |
+| 12 | ⬜ **PG infra 方案待决** | WSL2 原生 / Docker / 服务器部署三选一。与 `docs/启动命令.md` §6 的 worker 部署一并定 |
 
 ---
 

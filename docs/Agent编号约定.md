@@ -48,19 +48,26 @@ langgraph 引用      ← 全项目零引用（包装了，一行没用）
 
 ## 4. RAG 与 Agent 的关系（易误解，单独说明）
 
-**RAG 不由任何 Agent 负责。**它是 `chat_service.prepare_chat` 里的一步函数调用。
+> 🔴 **2026-10-17 更新**：RAG 已从「固定前置」改成**工具化 + LangGraph 编排**，
+> 本节原内容作废。现行关系：
+
+**RAG 检索由 LangGraph 图里的一个工具节点执行**，模型自己决定调不调。
 
 ```
-prepare_chat():
-    ...
-    rag_items = await rag_service.retrieve_relevant(...)   ← 直接函数调用
-    system = SYSTEM_PROMPT + 拼上召回结果
+app/agents/rag_graph.py（⏳ 待建）：
+    START → decide ─┬─ 要检索 & round_no<2 → search（调 rag_service）─┐
+                    ├─ 不检索                → answer → END
+                    └─ round_no>=2（兜底）    → answer → END
 ```
 
-**为什么不归 A1**：A1 的职责是「决定调不调某个 Agent」。RAG 是一个**可选的数据增强步骤**，
-不是 Agent；把「要不要检索」的决策交给 A1（一个不存在的实体）会让本已简单的链路变复杂。
+**与 A1 的关系**：A1 的职责是「决定调不调某个 Agent」，而 RAG 现在是**模型直接决定的工具调用**，
+两者是**不同层级的编排**——RAG 走 LangGraph 图，A1 是图之上（将来）的那一层。
+两者不冲突，但别混为一谈。
 
-**详见 `docs/RAG索引任务-设计.md` §8**（读取侧契约）。
+⚠️ **本文 §1 那句「5 个 Agent 全部是规划编号，没有一个是代码实体」**：
+`rag_graph` 落地后，A1 会有**第一个真实的代码实体**（尽管它只是个图）。
+
+**详见 `docs/RAG索引任务-设计.md` §8**（读取侧契约与拍板变更记录）。
 
 ## 5. 对话里的商品卡片归谁
 
