@@ -164,7 +164,7 @@ async def _drain(uid: int, text: str = "测试提问") -> tuple[list[tuple[str, 
 async def test_stream_completed_persists_assistant(user, monkeypatch):
     async def fake_stream(key, messages, **kwargs):
         for piece in ["根据", "你的", "需求，", "推荐"]:
-            yield piece
+            yield model_call.StreamEvent(kind="text", text=piece)
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
     events, cid = await _drain(user)
@@ -181,7 +181,7 @@ async def test_stream_completed_persists_assistant(user, monkeypatch):
 
 async def test_stream_model_error_saves_partial_as_failed(user, monkeypatch):
     async def fake_stream(key, messages, **kwargs):
-        yield "已经说了几句"
+        yield model_call.StreamEvent(kind="text", text="已经说了几句")
         raise model_call.ModelCallError("模型服务已欠费，请前往对应平台充值后重试")
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
@@ -230,7 +230,7 @@ async def test_stream_interrupt_persists_interrupted(user, monkeypatch):
     """
     async def fake_stream(key, messages, **kwargs):
         for piece in ["说了", "几句", "不该说完"]:
-            yield piece
+            yield model_call.StreamEvent(kind="text", text=piece)
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
     from fastapi import BackgroundTasks
@@ -265,7 +265,7 @@ async def test_stream_client_disconnect_leaves_no_orphan(user, monkeypatch):
     看起来完整、实际只说了半句的回答。
     """
     async def fake_stream(key, messages, **kwargs):
-        yield "半句"
+        yield model_call.StreamEvent(kind="text", text="半句")
         raise model_call.ModelCallError("模型调用失败")
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
@@ -289,7 +289,7 @@ async def test_stream_concurrent_requests_do_not_conflict(user, monkeypatch):
         # 每路的标识取自本轮用户输入尾部；yield 3 次同一标识，落库文本应为 3 份
         marker = messages[-1]["content"][-6:]
         for _ in range(3):
-            yield marker
+            yield model_call.StreamEvent(kind="text", text=marker)
             await asyncio.sleep(0)
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
@@ -405,7 +405,7 @@ async def test_a6_input_text_excludes_partial_content(user, monkeypatch):
 
     async def fake_call(key, messages, **kwargs):
         captured["prompt"] = messages[-1]["content"]
-        return '{"updated": false}', "fake-model"
+        return '{"updated": false}', "fake-model", []
 
     monkeypatch.setattr(model_call, "call_model", fake_call)
     await profile_service.refresh_profile(user, cid)
@@ -433,7 +433,7 @@ async def _logged_in_client(uid: int):
 async def test_stream_endpoint_headers_and_order(user, monkeypatch):
     """HTTP 层：Content-Type 是 text/event-stream，防缓冲头在，meta 先于任何 delta。"""
     async def fake_stream(key, messages, **kwargs):
-        yield "你好"
+        yield model_call.StreamEvent(kind="text", text="你好")
 
     monkeypatch.setattr(model_call, "stream_model", fake_stream)
     _windows.clear()

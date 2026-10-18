@@ -12,6 +12,7 @@ yield session，连接会被整条流占住；pool_size=10 的话 10 个并发�
 """
 
 from dataclasses import dataclass
+import json
 
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,13 +132,87 @@ async def persist_reply(user_id: int, conversation_id: int, reply: str,
     return message.id
 
 
+async def persist_graph_messages(
+        user_id: int, conversation_id: int,
+        new_messages: list[dict],
+        final_reply: str, model: str | None, status: str,
+        session: AsyncSession) -> list[int]:
+    """把图跑完后的**新增消息逐条**落库，返回落库的 message id 列表。
+
+    🔴 **为什么不沿用 persist_reply**：那条只写一条 assistant。但工具化之后
+    一轮会产出**多条**：
+        assistant(tool_calls) → tool(检索结果) → assistant(最终答案)
+    漏掉前两条，用户刷新就看不到「系统翻过他的物品库」（§8.4）。
+
+    `new_messages` 里**不含 system / user / 历史**——那些 prepare_chat 已落过，
+    这里只落本轮图新增的部分（调用方按初始 state 长度切片）。
+
+    🔴 **成对落库是协议硬要求**：assistant 发了 tool_calls，下一条必须是配对的
+    role="tool"（带 tool_call_id），**孤立会被厂商直接拒 400**。所以末尾要补占位
+    ——典型场景是用户在「让我查一下」之后按了停止。
+
+    返回空列表是合法的（模型什么都没说，与 persist_reply 的空文本口径一致）。
+    """
+    written: list[int] = []
+    # 待配对的 tool_call id：assistant 发出了 tool_calls，等下一条 tool 消息消掉
+    pending_tool_ids: list[str] = []
+
+    for msg in new_messages:
+        role = msg.get("role")
+        if role == "assistant" and msg.get("tool_calls"):
+            # 🔴 方案 B（§8.4）：这条 assistant 只发了 tool_calls 没有正文，
+            #    content 存 tool_calls 的 JSON 字符串而不是 None——
+            #    **content 是 NOT NULL**，存 NULL 会直接报错。
+            content = json.dumps({"tool_calls": msg["tool_calls"]},
+                                 ensure_ascii=False)
+            row = await chat_repo.add_message(
+                user_id, conversation_id, "assistant", content, session,
+                model=model, status=chat_repo.STATUS_COMPLETED)
+            written.append(row.id)
+            pending_tool_ids.extend(
+                tc.get("id") or "" for tc in msg["tool_calls"])
+        elif role == chat_repo.ROLE_TOOL:
+            row = await chat_repo.add_message(
+                user_id, conversation_id, chat_repo.ROLE_TOOL,
+                msg.get("content") or "", session,
+                model=None, status=chat_repo.STATUS_COMPLETED)
+            written.append(row.id)
+            tcid = msg.get("tool_call_id")
+            if tcid in pending_tool_ids:
+                pending_tool_ids.remove(tcid)
+
+    # 🔴 补占位：还有 tool_calls 没等到配对的 tool 消息（用户中途按停止）。
+    #    不补的话下一轮 messages_for_context 会拼出**孤立的 tool_calls**，
+    #    厂商按协议直接拒 400 —— 而用户只是「想打断一下」，
+    #    不该导致整个会话瘫掉。
+    for tcid in pending_tool_ids:
+        row = await chat_repo.add_message(
+            user_id, conversation_id, chat_repo.ROLE_TOOL,
+            json.dumps({"interrupted": True, "tool_call_id": tcid},
+                       ensure_ascii=False),
+            session, model=None, status=chat_repo.STATUS_COMPLETED)
+        written.append(row.id)
+
+    # 最后落最终答案。空文本不落库（同 persist_reply 的口径，见设计文档 §1.3）
+    if final_reply.strip():
+        row = await chat_repo.add_message(
+            user_id, conversation_id, "assistant", final_reply, session,
+            model=model, status=status)
+        written.append(row.id)
+
+    if written:
+        await conversation_repo.touch_conversation(
+            user_id, conversation_id, session)
+    return written
+
+
 async def send_message(user_id: int, payload: ChatSendInSchema,
                        session: AsyncSession,
                        background_tasks: BackgroundTasks) -> ChatSendOutSchema:
     """非流式链路 POST /chat/message。保留作旧端点与外部脚本的后路（设计文档 §5.1）。"""
     prepared = await prepare_chat(user_id, payload, session)
     try:
-        reply, model = await model_call.call_model(prepared.key, prepared.messages)
+        reply, model, _tool_calls = await model_call.call_model(prepared.key, prepared.messages)
     except model_call.ModelCallError as exc:
         # str(exc) 透传：model_call 的报错全是用户可读中文，无 key/base_url。
         # 🔴 key 失效标记的责任在这里（call_model 已无 session）：文案写的是

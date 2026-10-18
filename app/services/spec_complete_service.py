@@ -3,7 +3,7 @@ import json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError, ErrorCode
-from app.services import model_call
+from app.services import api_key_service, model_call
 from app.services.web_search_service import web_search
 
 _MAX_NAME = 256
@@ -64,7 +64,14 @@ async def complete_specs(name:str,category: str |None,user_id:int ,session:Async
         return {"name": name, "category": category, "price": None,
                 "specs": {}, "model": None, "sources": []}
     try:
-        content,model = await model_call.call_model(user_id, [{"role": "user", "content": _build_prompt(name,results)}], session=session)
+        # 🔴 2026-10-16 call_model 改成收 KeyRecord（取 key 的责任上移到调用方），
+        #    这里漏改了：还在传 user_id + session=，一调必 TypeError。
+        #    连带后果是 `/cart/items/ai-draft` 这个端点一直是坏的（一直没被发现）。
+        # 🔴 2026-10-17 call_model 返回值从 (text, model) 变成 (text, model, tool_calls)
+        #    ——不接第三个的话解包会 ValueError。
+        key = await api_key_service.key_for_call(user_id, session)
+        content, model, _tool_calls = await model_call.call_model(
+            key, [{"role": "user", "content": _build_prompt(name, results)}])
     except model_call.ModelCallError as exc:
         raise BizError(ErrorCode.INTERNAL, str(exc)) from exc
     try:

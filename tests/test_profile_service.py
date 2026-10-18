@@ -184,9 +184,9 @@ def _patch_both(monkeypatch, a6_reply: str) -> dict:
     async def fake_call(key, messages, **kwargs):
         if messages and messages[0]["content"] == profile_service.PROFILE_SYSTEM_PROMPT:
             seen["a6_input"] = messages[1]["content"]
-            return a6_reply, "fake-model"
+            return a6_reply, "fake-model", []
         seen["chat_system"] = messages[0]["content"]
-        return "chat 回复", "fake-model"
+        return "chat 回复", "fake-model", []
 
     monkeypatch.setattr(model_call, "call_model", fake_call)
     return seen

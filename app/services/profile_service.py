@@ -238,7 +238,7 @@ async def refresh_profile(user_id: int, conversation_id: int) -> None:
         # call_model 已改成收 KeyRecord 不收 session（2026-10-16 拍板）
         async with async_session_local() as session:
             key = await api_key_service.key_for_call(user_id, session)
-            verdict, _ = await model_call.call_model(key, [
+            verdict, _, _tool_calls = await model_call.call_model(key, [
                 {"role": "system", "content": PROFILE_SYSTEM_PROMPT},
                 {"role": "user", "content": (
                     f"【当前画像】\n{prefs_json[:_EVIDENCE_CAP]}\n\n"

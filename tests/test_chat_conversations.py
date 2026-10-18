@@ -178,7 +178,7 @@ async def test_send_message_touches_conversation(pair, monkeypatch):
     且列表仍是 id desc 的顺序（conv2 在前）——两个断言专门抓那个 bug。
     """
     async def fake_call(key, messages, **kwargs):
-        return "好的，看机械键盘。", "fake-model"
+        return "好的，看机械键盘。", "fake-model", []
 
     monkeypatch.setattr(model_call, "call_model", fake_call)
     async with _logged_in_client(pair["email"]) as client:

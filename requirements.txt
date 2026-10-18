@@ -15,12 +15,11 @@
 # 约定：本文件只写「顶层依赖 + 范围约束」，不写死精确版本；
 #      需要精确复现时用 requirements.lock.txt（或 uv lock）锁定。
 #
-# 📌 **LangGraph 一族仍未列入（2026-10-17 复核）**：
-#   `fast` 环境里实际装有 langgraph 1.2.4 / langchain 1.3.4，
-#   但**全项目零引用**（`grep -rn "langgraph|StateGraph" app/` 无命中），
-#   `app/agents/` 目录也不存在——5 个 Agent 全部是规划编号，没有一个是代码实体。
-#   **依赖没有跟上代码，该修的是代码而不是依赖**。等真要接入编排时再补这里，
-#   届时一并删掉本段。
+# 🔴 **LangGraph 一族（2026-10-17 已列入）**：
+#   RAG 读取侧从「固定前置」改成工具化后，编排走 LangGraph（`app/agents/rag_graph.py`）。
+#   实测版本：langgraph 1.2.4 / langchain-core 1.4.2。
+#   ⚠️ **1.x 与网上 0.x 教程 API 不同**，且默认 recursion_limit 是 10007 不是 25 ——
+#      详见 docs/RAG索引任务-设计.md §8.2 的三条硬约束。
 # ============================================================
 
 # ---------- Web 框架 ----------
@@ -80,3 +79,4 @@ bcrypt>=4.1
 # asyncpg：PG 的异步驱动，PG_URL 用 postgresql+asyncpg://
 #   ⚠️ 它的连接串 scheme 是 **postgresql+asyncpg**，不是 mysql+aiomysql 那种写法
 asyncpg>=0.29
+langgraph>=1.2.4
