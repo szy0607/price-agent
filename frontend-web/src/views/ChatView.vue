@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { PhArchive, PhChatsCircle, PhCheck, PhCircleNotch, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import ItemChip from '../components/ItemChip.vue'
@@ -9,6 +9,9 @@ import { marked } from 'marked'
 import { getRagIndexStatus, listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage } from '../utils/api'
 
 marked.setOptions({ breaks: true, gfm: true })
+
+// 卡片「加入购物车」需要跳转到购物车页
+const router = useRouter()
 
 function renderMarkdown(text) {
   return marked.parse(text || '')
@@ -159,6 +162,37 @@ function toolCallQuery(tc) {
   }
 }
 
+// ---------- 商品卡片（阶段 5） ----------
+
+// 🔴 来源只显示**域名**，不做成可点击链接。
+//    博查返回的 url 可能带返佣（CPS），项目铁律明令禁止给用户。
+//    try/catch 是因为卡片 url 来自外部，不能假设它一定是合法 URL。
+function sourceHost(url) {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
+// 「加入购物车」：把卡片草稿**带到购物车页面**，而不是直接入库。
+// 🔴 合规红线（零交易动作）：AI 建议只是建议，必须用户自己在购物车确认后才入库。
+//    这里用 sessionStorage 传参（页面跳转会被清空），购物车页读到后预填表单。
+function prefillCardDraft(item) {
+  try {
+    sessionStorage.setItem('price-agent:cardDraft', JSON.stringify({
+      name: item.name,
+      // 🔴 卡片里没有结构化参数（卡片用的是 snippet 概要），
+      //   所以只带 name/specs 空壳，用户在购物车补参数。
+      source: 'card',
+    }))
+  } catch {
+    // sessionStorage 不可用（隐私模式/配额满）→ 静默失败，
+    // 顶多是用户少了个预填，不该因此报错中断
+  }
+  router.push('/cart')
+}
+
 async function loadRagStatus() {
   try {
     const res = await getRagIndexStatus()
@@ -291,6 +325,18 @@ async function send() {
           //    「正在对比…」，而 tool_calls 那行已经能说明「系统做了什么」。
           if (!reply.agents) reply.agents = []
           reply.agents.push({ name: data.name, phase: data.phase, label: data.label })
+          scrollToBottom()
+        } else if (event === 'card') {
+          // 🔴 商品卡片（结构化结果，阶段 5 新增）。
+          //    payload: {query, items: [{name, snippet, url}]}
+          //
+          //    ⚠️ **卡片不落库**：它是这一轮的搜索快照，刷新后会消失。
+          //       这是刻意的（合规红线：草稿只在当前响应里，用户点确认才入库）。
+          //
+          //    ⚠️ **url 只当「来源」显示，绝不做成可点击链接**：
+          //       博查返回的地址可能带返佣（CPS），项目铁律禁止。
+          if (!reply.cards) reply.cards = []
+          reply.cards.push(data)
           scrollToBottom()
         } else if (event === 'error') {
           // 后端已翻译成用户可读中文；失败不能只存在于流里，输入框上方也要显示
@@ -436,6 +482,23 @@ onMounted(async () => {
               <div v-else class="max-w-[85%] break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">
                 <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
                   <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
+                </div>
+                <!-- 🔴 商品卡片（阶段 5）：结构化结果，渲染在过程提示上方。
+                     一次搜索可能返回多张卡，每张有商品名 + 概要 + 「加入购物车」。
+                     ⚠️ 卡片不落库，刷新后消失——草稿只在当前响应里（合规红线）。 -->
+                <div v-if="message.cards && message.cards.length" class="mb-2.5 space-y-2">
+                  <template v-for="(card, ci) in message.cards" :key="ci">
+                    <div v-for="(item, ii) in card.items" :key="`${ci}-${ii}`" class="rounded-lg border border-zinc-200 bg-zinc-50/70 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/50">
+                      <p class="text-sm font-medium leading-snug text-zinc-900 dark:text-zinc-100">{{ item.name }}</p>
+                      <p v-if="item.snippet" class="mt-1 line-clamp-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{{ item.snippet }}</p>
+                      <div class="mt-2 flex items-center gap-2">
+                        <button type="button" class="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90" @click="prefillCardDraft(item)">加入购物车</button>
+                        <!-- 🔴 url 只显示域名当来源，**不做成可点击链接**（可能带返佣 CPS） -->
+                        <span v-if="item.url" class="truncate text-[10px] text-zinc-400">{{ sourceHost(item.url) }}</span>
+                      </div>
+                    </div>
+                  </template>
+                  <p class="text-[10px] text-zinc-400">来源：网络 · 参数仅供参考，可在购物车修改</p>
                 </div>
                 <!-- 🔴 过程提示（「正在对比…」）：一格一格累加，渲染在正文上方。
                      与 tool_calls 同一个位置但语义不同：

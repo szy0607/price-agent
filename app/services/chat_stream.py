@@ -142,6 +142,10 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
             #    落库的 answer 里出现「正在对比…」这种噪声。
             for ev in await sink.flush_agents():
                 yield _sse("agent", ev)
+            # 🔴 卡片是**结构化结果**（不是过程提示），走独立的 card 事件。
+            #    不进 collected —— 它不是正文，落库会污染 answer。
+            for card_payload in await sink.flush_cards():
+                yield _sse("card", card_payload)
             # 🔴 这个 sleep(0) 不能省：不让出控制权的话，图里的节点永远拿不到
             #    CPU → 前端看到「转圈半天然后失败」。
             await asyncio.sleep(0)
@@ -154,6 +158,9 @@ async def chat_stream(user_id: int, payload: ChatSendInSchema,
         # 🔴 agent 事件同样要补取：节点可能刚好在最后一刻写了「对比结束」。
         for ev in await sink.flush_agents():
             yield _sse("agent", ev)
+        # 🔴 循环外同样要补取：节点可能刚好在最后一刻写了卡片。
+        for card_payload in await sink.flush_cards():
+            yield _sse("card", card_payload)
 
         final_state = await run_task
     except (asyncio.CancelledError, GeneratorExit):

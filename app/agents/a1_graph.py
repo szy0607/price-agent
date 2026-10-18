@@ -51,13 +51,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import async_session_local
 from app.services import (compare_service, compare_specs_service, model_call,
-                         profile_service, rag_service, recommend_service)
+                         profile_service, rag_service, recommend_service,
+                         web_search_service)
 from app.services.api_key_service import KeyRecord
 
 logger = logging.getLogger(__name__)
 TOOL_NAME = "search_my_items"
 COMPARE_TOOL_NAME = "compare_items"
 RECOMMEND_TOOL_NAME = "recommend_for_me"
+CARD_TOOL_NAME = "show_item_card"
 MAX_COMPARE_ITEMS = 3      # 🔴 大宋 22:40 拍板：对比最多 3 件
 
 # 🔴 每种工具的次数上限。**分开计数**，不用一个 MAX_ROUNDS：
@@ -67,6 +69,9 @@ MAX_COMPARE_ITEMS = 3      # 🔴 大宋 22:40 拍板：对比最多 3 件
 MAX_SEARCH_ROUNDS = 2
 MAX_COMPARE_ROUNDS = 1
 MAX_RECOMMEND_ROUNDS = 1
+MAX_CARD_ROUNDS = 1
+# 🔴 卡片最多弹几张。web_search 返回 5 条，全弹出来对话里会挤。
+MAX_CARD_ITEMS = 3
 
 # 🔴 实测（2026-10-18，加compare 节点后重新实测）：
 #   最坏路径 = 检索 2 次 + 对比 1 次 + 收尾的 decide：
@@ -96,7 +101,30 @@ MAX_RECOMMEND_ROUNDS = 1
 #     第 3 次 10-18：按节点执行算 9，**漏了 END 那一跳**
 #   正确算法：**节点执行次数 + 1**（END 占一步）
 RECURSION_LIMIT = 2 * (MAX_SEARCH_ROUNDS + MAX_COMPARE_ROUNDS
-                        + MAX_RECOMMEND_ROUNDS) + 1 + 1
+                        + MAX_RECOMMEND_ROUNDS + MAX_CARD_ROUNDS) + 1 + 1
+
+CARD_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": CARD_TOOL_NAME,
+        "description": (
+            "搜索并展示商品卡片，让用户直接看到商品名与概要、能一键加入购物车。"
+            "当用户提到某个具体商品（品牌+型号、或商品名）想了解它时调用。"
+            "**只用于单个商品的展示** —— 要比较多件用 compare_items，"
+            "不知道买什么用 recommend_for_me。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "要展示的商品（品牌+型号最好，如「索尼 WH-1000XM5」）",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}]
 
 RECOMMEND_TOOL = [{
     "type": "function",
@@ -201,6 +229,12 @@ class TextSink:
           那个类是 `model_call.stream_model` 的产出，描述「模型吐了什么」；
           而「正在对比」是**编排层知道、模型不知道**的事 —— 节点开始跑的时候
           模型早就返回完了。塞进去就得让模型层发它，可模型层不知道有 compare 节点。
+
+       🔴 **card 通道为什么是第三个而不是塞进 agents**（2026-10-18）：
+          `agent` 是「**过程提示**」（一行字，转圈→打勾）；
+          `card` 是「**结构化结果**」（一张卡片，有字段有按钮）。
+          塞进 agents 的话前端得按 name 分流，且 `agent` 事件的语义就不纯了。
+          **三个通道的语义边界**：text=正文 / agent=过程 / card=结构化结果。
     """
 
     def __init__(self) -> None:
@@ -208,6 +242,8 @@ class TextSink:
         # agent 事件：{name, phase, label}。name 是节点名（A4 / A5 / 卡片），
         # phase 是 start / end。见 docs/流式输出-设计.md §5.4 预留的协议位。
         self._agents: list[dict] = []
+        # card 事件：结构化商品卡片的 payload（见 write_card 的 docstring）
+        self._cards: list[dict] = []
 
     def write(self, chunk: str) -> None:
         if chunk:
@@ -233,6 +269,30 @@ class TextSink:
         """取出尚未消费的 agent 事件。**取出后即清空**（与 flush 同口径）。"""
         await asyncio.sleep(0)
         out, self._agents = self._agents, []
+        return out
+
+    def write_card(self, payload: dict) -> None:
+        """写一张商品卡片（结构化结果，给前端渲染）。
+
+        payload 形态（字段与 `web_search` 的返回一致 + 清理后的 query）：
+        ```
+        {"query": "用户搜的词",
+         "items": [{"name": "商品名", "snippet": "概要", "url": "来源"}, ...]}
+        ```
+
+        🔴 **不落库**（docs/对话侧商品卡片-设计.md §5.4）：卡片是「这一轮的
+           搜索快照」，和 agent 事件同类。用户点「加入购物车」才走
+           `POST /cart/items`——**草稿只在当前响应里**（§8.4 大宋拍板的合规红线）。
+
+        ⚠️ **卡片里的 url 不能直接渲染成可点击链接**：博查返回的地址可能带返佣
+           （CPS），项目铁律明令禁止。前端只应把它当「来源」显示。
+        """
+        self._cards.append(payload)
+
+    async def flush_cards(self) -> list[dict]:
+        """取出尚未消费的卡片。**取出后即清空**（与前两个通道同口径）。"""
+        await asyncio.sleep(0)
+        out, self._cards = self._cards, []
         return out
 
 def _append_messages(left: list, right: list) -> list:
@@ -275,6 +335,7 @@ class RagState(TypedDict, total=False):
     search_rounds: int
     compare_rounds: int
     recommend_rounds: int
+    card_rounds: int
 
 
 # 🔴 没配向量模型时，工具仍要定义，但 description 明说不可用。
@@ -311,6 +372,7 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     search_rounds = state.get("search_rounds", 0)
     compare_rounds = state.get("compare_rounds", 0)
     recommend_rounds = state.get("recommend_rounds", 0)
+    card_rounds = state.get("card_rounds", 0)
 
     # 🔴 **每个工具单独判次数**（2026-10-18 加compare 时改的）。
     #   之前是「一个 MAX_ROUNDS 管所有工具」，现在必须分开——因为
@@ -322,6 +384,7 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     can_search = search_rounds < MAX_SEARCH_ROUNDS
     can_compare = compare_rounds < MAX_COMPARE_ROUNDS
     can_recommend = recommend_rounds < MAX_RECOMMEND_ROUNDS
+    can_card = card_rounds < MAX_CARD_ROUNDS
     has_key = await rag_service.has_embedding_key(user_id, session)
 
     tools: list[dict] = []
@@ -334,6 +397,8 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
         tools.append(COMPARE_TOOL[0])
     if can_recommend:
         tools.append(RECOMMEND_TOOL[0])
+    if can_card:
+        tools.append(CARD_TOOL[0])
     # ⚠️ tools 为空时传None（模型调用层会当「不带工具」）——
     #   传 [] 有些厂商会当成「有一个空工具列表」而报错。
 
@@ -609,6 +674,74 @@ async def _run_recommendation(question: str, user_id: int, key: KeyRecord,
     return recommend_service.format_recommendation(rankings, specs)
 
 
+async def card(state: RagState, sink: TextSink, user_id: int,
+               session: AsyncSession) -> dict:
+    """执行卡片工具：搜索商品 → 结构化卡片给前端 → 一句话交回模型。
+
+    🔴 **大宋 23:47 拍板：不做名称清洗，`web_search` 原样返回。**
+    理由是「用户可以在购物车修改」—— 少一层可能出错的正则。
+
+    🔴 **成本 0.036 元 + 约 0.5 秒**（1 次博查，**0 次主模型**）。
+    与 compare/recommend 不同：卡片不需要结构化参数表——
+    `snippet` 已经是两三句话的概要，卡片是「概要 + 一键加入」。
+
+    **卡片不落库**（docs/对话侧商品卡片-设计.md §5.4）：它是这一轮的搜索快照，
+    用户点「加入购物车」才走 POST /cart/items（合规红线：AI 建议只是建议）。
+
+    🔴 **失败不抛异常**，转成给模型看的文本。
+    """
+    calls = state.get("tool_calls") or []
+    new_messages: list[dict] = []
+
+    sink.write_agent("CARD", "start", "正在查商品")
+    try:
+        for call in calls:
+            query = str(call.parsed_arguments().get("query") or "").strip()
+            if not query:
+                new_messages.append({
+                    "role": "tool", "tool_call_id": call.id,
+                    "content": "卡片失败：没有提供商品名。",
+                })
+                continue
+            try:
+                results = await web_search_service.web_search(
+                    f"{query} 价格 参数", count=MAX_CARD_ITEMS + 2)
+            except Exception:
+                # 🔴 博查失败（未配 key / 网络故障）→ 告诉模型，不要抛
+                logger.warning("卡片搜索失败 query=%s", query, exc_info=True)
+                results = []
+
+            items = [{
+                "name": (r.get("name") or "").strip(),
+                "snippet": (r.get("snippet") or "").strip(),
+                # ⚠️ url 只作「来源」显示，**前端不能渲染成可点击链接**——
+                #    博查返回的地址可能带返佣（CPS），项目铁律禁止。
+                "url": (r.get("url") or "").strip(),
+            } for r in results if (r.get("name") or "").strip()
+                ][:MAX_CARD_ITEMS]
+
+            if items:
+                # 🔴 卡片 payload 直接走 sink 的 card 通道（不经过 messages）
+                sink.write_card({"query": query, "items": items})
+                names = "、".join(i["name"] for i in items)
+                text = (f"已向用户展示了{len(items)} 个商品卡片：{names}。"
+                        "请用一句话说明你在展示什么，**不要重复罗列卡片里已有的内容**"
+                        "（用户看得到）。")
+            else:
+                text = ("没搜到这个商品。请直接告诉用户「没搜到」，"
+                        "**不要编造商品或价格**。")
+
+            new_messages.append({
+                "role": "tool", "tool_call_id": call.id, "content": text,
+            })
+    finally:
+        sink.write_agent("CARD", "end")
+
+    return {"messages": new_messages,
+            "card_rounds": state.get("card_rounds", 0) + 1,
+            "tool_calls": []}
+
+
 def route(state: RagState) -> str:
     """按**工具名**分派到对应节点；没有工具调用 → END。
 
@@ -629,6 +762,8 @@ def route(state: RagState) -> str:
         return "compare"
     if name == RECOMMEND_TOOL_NAME:
         return "recommend"
+    if name == CARD_TOOL_NAME:
+        return "card"
     return "search"
 
 
@@ -656,11 +791,18 @@ def build_graph(key: KeyRecord, sink: TextSink):
         async with async_session_local() as session:
             return await recommend(state, sink, key, session)
 
+    async def node_card(state: RagState) -> dict:
+        # card 节点只需要 user_id 与 session（它不发模型请求给模型用，
+        # 只是在 messages 里回一句话），所以不传 key。
+        async with async_session_local() as session:
+            return await card(state, sink, state["user_id"], session)
+
     g = StateGraph(RagState)
     g.add_node("decide", node_decide)
     g.add_node("search", node_search)
     g.add_node("compare", node_compare)
     g.add_node("recommend", node_recommend)
+    g.add_node("card", node_card)
     g.add_edge(START, "decide")
     # 🔴 映射表里的 END 是 `langgraph.graph.END`（值是 '__end__'），
     #   route 必须 return **这个常量**而不是字符串 "END"——
@@ -668,8 +810,9 @@ def build_graph(key: KeyRecord, sink: TextSink):
     g.add_conditional_edges(
         "decide", route,
         {"search": "search", "compare": "compare",
-         "recommend": "recommend", END: END})
+         "recommend": "recommend", "card": "card", END: END})
     g.add_edge("search", "decide")
     g.add_edge("compare", "decide")
     g.add_edge("recommend", "decide")
+    g.add_edge("card", "decide")
     return g.compile()

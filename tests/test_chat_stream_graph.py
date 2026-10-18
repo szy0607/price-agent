@@ -42,6 +42,7 @@ class FakeSink:
     def __init__(self) -> None:
         self._pending: list[str] = []
         self._agents: list[dict] = []
+        self._cards: list[dict] = []
 
     def write(self, chunk: str) -> None:
         if chunk:
@@ -49,6 +50,9 @@ class FakeSink:
 
     def write_agent(self, name: str, phase: str, label: str = "") -> None:
         self._agents.append({"name": name, "phase": phase, "label": label})
+
+    def write_card(self, payload: dict) -> None:
+        self._cards.append(payload)
 
     async def flush(self) -> list[str]:
         # 🔴 这里用 sleep(0) 而非真的等：探测「循环外补flush」有没有生效，
@@ -60,8 +64,15 @@ class FakeSink:
         out, self._agents = self._agents, []
         return out
 
+    async def flush_cards(self) -> list[dict]:
+        # 🔴 阶段 5 加的第三通道。漏了这个方法会让 chat_stream 的
+        #    `await sink.flush_cards()` 抛 AttributeError —— 9 个测试全红，
+        #    表现为「status 变成 failed」，看着像业务 bug 其实是桩缺方法。
+        out, self._cards = self._cards, []
+        return out
 
-def _make_build(script, boom=None, extra_messages=None, agents=None):
+
+def _make_build(script, boom=None, extra_messages=None, agents=None, cards=None):
     """造 build_graph 的替身：接sink、按时序写文本、可选抛异常、可选返回新增消息。
 
     🔴 `sink` 必须从 build_graph 的入参拿——真实 a1_graph 里
@@ -79,6 +90,9 @@ def _make_build(script, boom=None, extra_messages=None, agents=None):
             async def ainvoke(self, state, config=None):
                 for name, phase, label in (agents or []):
                     sink.write_agent(name, phase, label)
+                    await _sleep(0)
+                for payload in (cards or []):
+                    sink.write_card(payload)
                     await _sleep(0)
                 for chunk, delay in script:
                     sink.write(chunk)
