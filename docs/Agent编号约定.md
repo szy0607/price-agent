@@ -67,18 +67,24 @@ langgraph 引用            ← ✅ 真在用了（不是「装了没用」）
 
 ```
 app/agents/a1_graph.py：
-    START → decide ⇄ search
-              ↓
-             END
+    START → decide ⇄ {search, compare, recommend, card}
 ```
 
 | 节点 | 职责 | 状态 |
 |---|---|---|
 | `decide` | **A1 本体**：调模型（带工具定义），让它决定调哪个工具、调几次 | ✅ 已实现 |
 | `search` | 执行 `rag_service.retrieve_relevant`（RAG 检索） | ✅ 已实现 |
-| `compare` | A4 参数对比（分维度） | ⬜ 设计见 `docs/A4对比与A5推荐-设计.md` |
-| `recommend` | A5 推荐（走博查联网） | ⬜ 同上 |
-| `card` | 商品卡片 | ⬜ 设计见 `docs/对话侧商品卡片-设计.md` |
+| `compare` | A4 参数对比（按用户问题选维度 + 分维度对比） | ✅ 已实现（10-18） |
+| `recommend` | A5 推荐（画像→搜索词→博查联网→排序） | ✅ 已实现（10-18） |
+| `card` | 商品卡片 | ⏸ **已停用**（10-19，取数质量问题，见下） |
+
+**限次是每工具独立的**（`search_rounds` / `compare_rounds` / `recommend_rounds` /
+`card_rounds`），不用一个 `round_no`——检索不花钱、对比/推荐要联网，混在一起会互相占额度。
+
+**`card` 为什么停用**：`web_search` 返回的是**网页**不是商品，
+实测「京东京东京东纯奶价格评测」返回的全是「京东价格行情页」「什么值得买排行榜页」，
+同一件商品的 6 个不同页面被渲染成 6 张卡片。取数问题另修（`search_filter`），
+卡片代码全留，`can_card = False` 一行可恢复。
 
 ### 4.3 🔴 为什么所有工具必须在同一个图里（硬约束，不是偏好）
 

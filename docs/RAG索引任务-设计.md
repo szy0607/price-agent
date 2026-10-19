@@ -497,13 +497,20 @@ arq 的 `enqueue_job(..., _job_id=...)`：同 ID 已在队列时**返回 None**�
 
 ### 8.1 检索位置：**工具化**（大宋 18:05 撤回后拍板）
 
-模型自己决定要不要调检索工具，走 **LangGraph 编排**（`app/agents/rag_graph.py`）。
+模型自己决定要不要调检索工具，走 **LangGraph 编排**（`app/agents/a1_graph.py`）。
+
+> 📌 **2026-10-18 该文件已从 `rag_graph.py` 改名为 `a1_graph.py`**（那张图本来就是 A1
+> 路由主管，见 `Agent编号约定.md` §4）。图也从 2 节点长到 5 节点。
 
 ```
-START → decide ─┬─ 要检索 & round_no<2 → search ─┐
-                ├─ 不检索→ answer → END
-                └─ round_no>=2（兜底）   → answer → END
+START → decide ⇄ {search, compare, recommend, card}
+                └─ 本节写的时候只有 search；后三个是 10-18/10-19 加的
 ```
+
+🔴 **`round_no` 已不存在**：现在每种工具**各自计数**
+（`search_rounds` / `compare_rounds` / `recommend_rounds` / `card_rounds`）。
+不用一个数字是因为**检索不花钱（用户自己的 embedding key）、对比/推荐要联网**，
+混在一起会互相占额度。详见 `a1_graph.py` 的 `decide`。
 
 **与固定前置的对比账**（原17:10 我给的论据，现在只作对照）：
 
@@ -542,11 +549,15 @@ START → decide ─┬─ 要检索 & round_no<2 → search ─┐
 
 | | 作用 | 撞满后 |
 |---|---|---|
-| 状态里的 `round_no` | **业务控制**：最多检索 2 次 | 主动走 answer，**正常回答** |
-| `recursion_limit=6` | **兜底**：防死循环 | 抛 `GraphRecursionError`，流断 |
+| 状态里的 `search_rounds` 等 | **业务控制**：每种工具各自限次 | 从 tools 里摘掉该工具，**正常回答** |
+| `recursion_limit=12` | **兜底**：防死循环 | 抛 `GraphRecursionError`，流断 |
+
+> ⚠️ 2026-10-18 更正：这里原来写的是「`round_no` / `recursion_limit=6`」，
+> 现在是**每工具独立计数 + `recursion_limit=12`**（4 种工具最坏路径 11 步 + END）。
+> `RECURSION_LIMIT` 我算错**三次**，详见 `a1_graph.py` 常量处的表格。
 
 ⚠️ 撞 `recursion_limit` 是**抛异常**，SSE 流会断在半路、用户看到「生成失败」。
-所以业务上必须靠 `round_no` 提前收尾，让上限永远撞不到。
+所以业务上必须靠**每工具的限次**（`search_rounds` 等）提前收尾，让上限永远撞不到。
 
 ### 8.3 `index_status`：**不进 prompt**，只在对话页给一条提示
 
