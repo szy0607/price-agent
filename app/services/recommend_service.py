@@ -36,7 +36,8 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BizError
-from app.services import model_call, profile_service, web_search_service
+from app.services import (model_call, profile_service, search_filter,
+                         web_search_service)
 from app.services.api_key_service import KeyRecord
 from app.services import compare_specs_service
 
@@ -135,22 +136,17 @@ async def search_candidates(searches: list[str]) -> list[str]:
 
     batches = await asyncio.gather(*[one(q) for q in searches])
 
-    seen: set[str] = set()
-    names: list[str] = []
-    for q, batch in zip(searches, batches):
-        for item in batch:
-            name = (item.get("name") or "").strip()
-            if not name or len(name) > 60:
-                continue
-            # 🔴 去重：关键词去重（不同搜索词很容易搜到同一个商品）
-            key = name[:18]
-            if key in seen:
-                continue
-            seen.add(key)
-            names.append(name)
-            if len(names) >= MAX_CANDIDATES:
-                return names
-    return names
+    # 🔴 2026-10-19 改用 search_filter：
+    #   原来这里自己写了一套去重（前18 字），**实测基本无效**——
+    #   「精选_京东牛奶_国内优惠排行_第203页」与「...第124页」
+    #   前 18 字里第 203 vs 第 124 不同，两个都留下了，
+    #   于是用户看到的是「同一件商品的 6 个不同页面」。
+    #   过滤器会挡掉聚合页 + 按主体名去重。见 search_filter 模块docstring。
+    merged: list[dict] = []
+    for batch in batches:
+        merged.extend(batch)
+    return [it["name"] for it in
+            search_filter.clean_results(merged, MAX_CANDIDATES)]
 
 
 # ---------- ④ 排序 ----------
