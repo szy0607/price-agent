@@ -21,6 +21,13 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 会话列表 / 历史消息 / RAG 索引状态：和 /chat 同源，必须显式代理，
+      // 否则 dev server 把 /conversations 当 SPA 路由返回 index.html，
+      // 前端 response.json() 解析失败 → 历史消息空白（Postman 直连 8000 却正常）
+      '/conversations': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       '/purchase-records': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

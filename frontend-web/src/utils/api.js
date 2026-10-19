@@ -231,6 +231,14 @@ export function listConversationMessages(conversationId, limit = 200) {
   return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`)
 }
 
+// 修改会话标题。PATCH 带写保护头（require_same_origin_write），apiRequest 对非 GET 自动加 X-Requested-With。
+export function updateConversationTitle(conversationId, title) {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/title`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+}
+
 /**
  * RAG 索引状态 —— 对话页那条提示的数据源（2026-10-18）。
  *
