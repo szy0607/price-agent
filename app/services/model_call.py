@@ -316,7 +316,25 @@ async def stream_model(
                     continue
                 usage = chunk.get("usage")
                 if usage:
-                    _log_truncation({"usage": usage})
+                    # 🔴 2026-10-19 修假告警：这里原来**只要有 usage 就打截断警告**，
+                    #   但厂商在**正常结束的流末尾也会带 usage**（token 用量统计）。
+                    #   症状：每次正常对话都刷
+                    #   `WARNING model output truncated: completion=772 reasoning=193`
+                    #   而实际输出完整、根本没截断。
+                    #
+                    #   **只有 finish_reason == "length" 才是真截断**
+                    #   （模型撞 max_token 被硬切）。非流式那条判据本来就对
+                    #   （见下面 `if finish_reason == "length"`），流式这条漏了——
+                    #   **两边口径不一致**。
+                    #
+                    # ⚠️ usage 的 chunk 常常不带 choices，所以 finish_reason 从同一个
+                    #   chunk 的 choices 里取；**取不到就不告警**
+                    #   （宁可漏报不可误报——假告警会让人以为出了问题）。
+                    _u_choices = chunk.get("choices") or []
+                    _u_fr = (_u_choices[0].get("finish_reason")
+                             if _u_choices else None)
+                    if _u_fr == "length":
+                        _log_truncation({"usage": usage})
                     continue
                 choices = chunk.get("choices") or []
                 if not choices:

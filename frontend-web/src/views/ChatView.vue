@@ -1,12 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { PhArchive, PhChatsCircle, PhCheck, PhCircleNotch, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPlus, PhShoppingCart, PhStop, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhChatsCircle, PhCheck, PhCircleNotch, PhCpu, PhMagnifyingGlass, PhPackage, PhPaperPlaneRight, PhPencilSimple, PhPlus, PhShoppingCart, PhStop, PhUser, PhX } from '@phosphor-icons/vue'
 import BrandIcon from '../components/BrandIcon.vue'
 import ItemChip from '../components/ItemChip.vue'
 import ItemRow from '../components/ItemRow.vue'
 import { marked } from 'marked'
-import { getRagIndexStatus, listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage } from '../utils/api'
+import { getRagIndexStatus, listCartItems, listConversations, listConversationMessages, listOwnedItems, streamChatMessage, updateConversationTitle } from '../utils/api'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -99,18 +99,36 @@ const listRef = ref(null)
 const modelSummary = { label: '默认模型', detail: '由设置中的默认 API Key 提供' }
 const abortRef = ref(null)
 
-// 最近一条 assistant 消息实际用的模型名（后端按 user 消息为 NULL 的口径存的）
-const lastReplyModel = computed(() => {
-  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
-    if (messages.value[i].role === 'assistant') return messages.value[i].model || null
-  }
-  return null
-})
-
 const activeTitle = computed(() => {
   if (activeConversationId.value === null) return '新咨询'
   return conversations.value.find((c) => c.id === activeConversationId.value)?.title || '会话'
 })
+
+// ---------- 重命名会话：悬停出现铅笔，点进去变 input，回车/失焦保存，Esc 取消 ----------
+const editingConvId = ref(null)
+const editingTitle = ref('')
+
+function startEditTitle(conversation) {
+  editingConvId.value = conversation.id
+  editingTitle.value = conversation.title
+  nextTick(() => {
+    const input = document.querySelector('input[aria-label="会话标题"]')
+    if (input) { input.focus(); input.select() }
+  })
+}
+
+async function saveTitle(conversationId) {
+  const value = editingTitle.value.trim()
+  editingConvId.value = null
+  if (!value) return
+  try {
+    await updateConversationTitle(conversationId, value)
+    const c = conversations.value.find((x) => x.id === conversationId)
+    if (c) c.title = value
+  } catch {
+    // 重命名失败不打断对话，标题保持原样（接口错误会在别处提示）
+  }
+}
 
 // 与后端 _fallback_title 同口径：折叠空白、去首尾标点、截断 100——草稿标题先本地算，刷新后以服务端为准
 function fallbackTitle(text) {
@@ -324,7 +342,22 @@ async function send() {
           //    与 index_status 同类）。这是刻意的——落库的话历史里会堆满
           //    「正在对比…」，而 tool_calls 那行已经能说明「系统做了什么」。
           if (!reply.agents) reply.agents = []
-          reply.agents.push({ name: data.name, phase: data.phase, label: data.label })
+          // 🔴 2026-10-19 改：start/end **配对到同一条记录**，而不是各渲染一个 span。
+          //
+          //    原来无脑 push → 界面上「正在对比商品参数」旁边多一个莫名其妙的
+          //    「A4」，而且两条都在转圈（end 那条本该是打勾）。
+          //    真机截图（2026-10-19）就是这个问题。
+          //
+          //    现在按 name 找那条 start：找到只把 phase 改成 end；
+          //    找不到才新建（理论上不会——节点是 try/finally 成对写的）。
+          const idx = reply.agents.findIndex(
+            (a) => a.name === data.name && a.phase === 'start',
+          )
+          if (idx >= 0) {
+            reply.agents[idx] = { ...reply.agents[idx], phase: 'end' }
+          } else {
+            reply.agents.push({ name: data.name, phase: data.phase, label: data.label })
+          }
           scrollToBottom()
         } else if (event === 'card') {
           // 🔴 商品卡片（结构化结果，阶段 5 新增）。
@@ -345,6 +378,13 @@ async function send() {
           reply.status = data.status
           if (data.message_id) reply.id = data.message_id
           if (data.status === 'interrupted') interrupted = true
+          // 🔴 兜底：流结束了，把还挂着的 start 全部收尾。
+          //    万一某次 end 事件丢了（网络抖动 / 浏览器断连重连），
+          //    不加这句就会**永远转圈**——用户看到「正在对比商品参数」停不下来。
+          //    与后端「异常时 try/finally 也会发 end」是双保险。
+          if (reply.agents) {
+            reply.agents = reply.agents.map((a) => (a.phase === 'start' ? { ...a, phase: 'end' } : a))
+          }
         }
       },
       controller.signal,
@@ -425,9 +465,31 @@ onMounted(async () => {
       <div class="mt-2 flex-1 space-y-1 overflow-y-auto">
         <p v-if="loadingConversations" class="px-3 py-2 text-xs text-zinc-400">加载中…</p>
         <p v-else-if="!conversations.length" class="px-3 py-2 text-xs text-zinc-400">还没有会话，发第一条消息即创建</p>
-        <button v-for="conversation in conversations" :key="conversation.id" type="button" class="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm" :class="activeConversationId === conversation.id ? 'bg-white font-medium text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-white' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900'" :disabled="sending" @click="openConversation(conversation.id)">
-          <PhChatsCircle :size="17" class="shrink-0" /><span class="truncate">{{ conversation.title }}</span>
-        </button>
+        <div v-for="conversation in conversations" :key="conversation.id" class="group flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm" :class="activeConversationId === conversation.id ? 'bg-white font-medium text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-white' : 'text-zinc-600 dark:text-zinc-400'">
+          <PhChatsCircle :size="17" class="shrink-0" />
+          <input
+            v-if="editingConvId === conversation.id"
+            v-model="editingTitle"
+            aria-label="会话标题"
+            class="min-w-0 flex-1 rounded border border-accent bg-white px-1.5 py-0.5 text-sm outline-none dark:bg-zinc-800 dark:text-white"
+            @click.stop
+            @keydown.enter.prevent="saveTitle(conversation.id)"
+            @keydown.esc.prevent="editingConvId = null"
+            @blur="saveTitle(conversation.id)"
+          />
+          <button v-else type="button" class="min-w-0 flex-1 truncate text-left" :disabled="sending" @click="openConversation(conversation.id)">{{ conversation.title }}</button>
+          <button
+            v-if="editingConvId !== conversation.id"
+            type="button"
+            class="shrink-0 text-zinc-400 opacity-0 transition hover:text-accent group-hover:opacity-100 dark:text-zinc-500"
+            title="重命名"
+            aria-label="重命名"
+            :disabled="sending"
+            @click.stop="startEditTitle(conversation)"
+          >
+            <PhPencilSimple :size="13" />
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -473,13 +535,19 @@ onMounted(async () => {
           <p class="mt-2 text-sm text-zinc-500">在右侧勾选购物车 / 物品库的商品，模型回答时会一并参考。</p>
         </div>
         <template v-else>
-          <div class="mx-auto max-w-3xl space-y-5">
-            <div v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
+          <div class="w-full space-y-6">
+            <div v-for="message in messages" :key="message.id" class="flex items-start gap-2.5" :class="message.role === 'user' ? 'flex-row-reverse' : ''">
               <!-- 🔴 role="tool" 不渲染任何东西：它与它前面那条 assistant(tool_calls)
                    是同一个信息（检索到什么），显示两遍是噪音。
                    保留这行占位是为了 v-for 的 key 稳定、且留出将来单独展示的空间。 -->
               <template v-if="message.role === 'tool'"><span class="hidden" aria-hidden="true"></span></template>
-              <div v-else class="max-w-[85%] break-words px-4 py-3 text-sm leading-6 sm:max-w-[78%]" :class="message.role === 'user' ? 'rounded-lg bg-accent text-white' : 'border-l-2 border-accent bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100'">
+              <template v-else>
+                <!-- 头像：assistant 用品牌吉祥物，user 用通用人形图标 -->
+                <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                  <BrandIcon v-if="message.role === 'assistant'" :size="26" />
+                  <PhUser v-else :size="18" class="text-zinc-500 dark:text-zinc-400" />
+                </div>
+                <div class="min-w-0 break-words px-4 py-3 text-sm leading-6 sm:px-5 sm:py-4" :class="message.role === 'user' ? 'max-w-full rounded-2xl rounded-br-md bg-accent text-white shadow-sm sm:max-w-[72%]' : 'flex-1 rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'">
                 <div v-if="message.refs && message.refs.length" class="mb-2 flex flex-wrap gap-1.5">
                   <ItemChip v-for="ref_ in message.refs" :key="`${ref_.src}-${ref_.id}`" :src="ref_.src" :name="ref_.name" :on-accent="message.role === 'user'" />
                 </div>
@@ -541,16 +609,17 @@ onMounted(async () => {
                 <p v-if="message.role === 'assistant' && message.status && message.status !== 'streaming' && message.status !== 'completed'" class="mt-2 text-xs" :class="message.status === 'interrupted' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'">
                   {{ message.status === 'interrupted' ? '已停止' : '生成失败' }}
                 </p>
-              </div>
+                </div>
+              </template>
             </div>
-            <p v-if="lastReplyModel" class="text-xs text-zinc-400" role="status">本次回复由 {{ lastReplyModel }} 生成</p>
+
           </div>
         </template>
         <p v-if="loadingMessages" class="mt-4 text-center text-sm text-zinc-500" role="status">正在加载历史消息…</p>
       </div>
 
       <div class="shrink-0 border-t border-zinc-200 px-4 py-4 sm:px-7 dark:border-zinc-800">
-        <div class="mx-auto max-w-3xl">
+        <div class="w-full">
           <!-- 引用区放在输入框这一屏里（不随消息滚动），否则对话一长就看不到自己引了哪些商品 -->
           <div v-if="selectedList.length" class="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
             <PhPackage :size="14" class="shrink-0" />
@@ -717,5 +786,37 @@ onMounted(async () => {
   margin: 0.8em 0;
   border: 0;
   border-top: 1px solid #e2e8f0;
+}
+/* 对比表格：圆角卡片 + 浅灰表头 + 细分隔线，避免浏览器默认表格在气泡里发飘 */
+.md-body :deep(table) {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.6em 0;
+  font-size: 0.88em;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.md-body :deep(th) {
+  text-align: left;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.md-body :deep(td) {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: top;
+}
+.md-body :deep(tr:last-child td) {
+  border-bottom: none;
+}
+@media (prefers-color-scheme: dark) {
+  .md-body :deep(table) { border-color: #334155; }
+  .md-body :deep(th) { background: #1e293b; border-bottom-color: #334155; color: #e2e8f0; }
+  .md-body :deep(td) { border-bottom-color: #1e293b; }
 }
 </style>
