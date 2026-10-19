@@ -384,7 +384,27 @@ async def decide(state: RagState, sink: TextSink, key: KeyRecord,
     can_search = search_rounds < MAX_SEARCH_ROUNDS
     can_compare = compare_rounds < MAX_COMPARE_ROUNDS
     can_recommend = recommend_rounds < MAX_RECOMMEND_ROUNDS
-    can_card = card_rounds < MAX_CARD_ROUNDS
+    # 🔴🔴 **卡片工具已停用**（2026-10-19 大宋看到真机效果后拍板去掉）。
+    #
+    #   停用原因（不是渲染问题，是**取数**问题）：
+    #   `web_search` 返回的是**网页**不是商品。实测同一个查询
+    #   「京东京东京东 纯奶 价格 评测」返回的全是
+    #     · 纯奶纯价格报价行情 - 京东
+    #     · 精选_京东牛奶_国内优惠排行_第203页 - 什么值得买
+    #     · 精选_京东牛奶_国内优惠排行_第124页 - 什么值得买
+    #   界面上就渲染出 6 张卡片，**全是同一件商品的不同页面**，
+    #   标题还是「京东京东京东」这种博查拼重复前缀的垃圾。
+    #
+    #   ⚠️ **这不是「暂时禁用」，也不只是「卡片」的问题**：
+    #     A5 推荐吃的是同一批脏数据（实测 A5 的候选名与卡片拿到的**几乎一样**）。
+    #     要治根得在 `recommend_service.search_candidates` 里做去重与过滤，
+    #     那是另一次判断（过滤规则要跟大宋对）。
+    #
+    #   **代码全部保留**（CARD_TOOL / card 节点 / TextSink 的 card 通道 / 前端渲染）——
+    #   卡片渲染本身是对的（截图里姓名/概要/来源/按钮都在），
+    #   将来取数修好或换商品 API，改一行就能恢复。
+    #   🔴 恢复方法：下面这行改成 `can_card = card_rounds < MAX_CARD_ROUNDS`
+    can_card = False
     has_key = await rag_service.has_embedding_key(user_id, session)
 
     tools: list[dict] = []
