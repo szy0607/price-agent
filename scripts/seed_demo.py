@@ -127,6 +127,61 @@ DEMO_USERS = [
 ]
 
 
+# 商品展示图：随前端构建产物打包（frontend-web/public/images/products/），
+# nginx 直接伺服 /price-agent/images/products/xx.jpg，不依赖后端鉴权，评委可直达。
+# 编号顺序 = seed_user13_data 中 CART_ITEMS(01-20) + PURCHASED_PRODUCTS(21-40)。
+PRODUCT_IMAGES = {
+    # ---- CART_ITEMS（01-20）----
+    "苹果 iPhone 16 Pro Max 512G": "01.jpg",
+    "索尼 WH-1000XM6 降噪耳机": "02.jpg",
+    "佳能 EOS R50 微单套机": "03.jpg",
+    "戴森 V12 Detect Slim 吸尘器": "04.jpg",
+    "石头 P10 Pro 扫地机器人": "05.jpg",
+    "格力 1.5匹 新一级能效空调 云佳": "06.jpg",
+    "九阳 破壁机 L18-Y916": "07.jpg",
+    "李宁 韦德之道11 篮球鞋": "08.jpg",
+    "威尔胜 NBA 比赛用球": "09.jpg",
+    "迪卡侬 公路自行车 RC100": "10.jpg",
+    "《深入理解计算机系统》第3版": "11.jpg",
+    "京东京造 泰国乳胶枕": "12.jpg",
+    "顾家家居 布艺沙发 三人位": "13.jpg",
+    "南极人 加绒保暖内衣套装": "14.jpg",
+    "波司登 极寒系列羽绒服": "15.jpg",
+    "雅诗兰黛 小棕瓶 第七代 75ml": "16.jpg",
+    "欧乐B iO 电动牙刷": "17.jpg",
+    "三只松鼠 坚果大礼包 30包": "18.jpg",
+    "农夫山泉 东方树叶 500ml×15瓶": "19.jpg",
+    "小米 米家照片打印机": "20.jpg",
+    # ---- PURCHASED_PRODUCTS（21-40）----
+    "苹果 iPhone 15 Pro 256G 原色钛金属": "21.jpg",
+    "联想拯救者 Y7000P 2026款 i7/16G/512G": "22.jpg",
+    "罗技 MX Master 3S 无线鼠标": "23.jpg",
+    "华为手环 8 标准版": "24.jpg",
+    "小米空气净化器 4 Pro": "25.jpg",
+    "海尔 471升 十字四开门冰箱": "26.jpg",
+    "美的 4L 电饭煲 MB-FB40E511": "27.jpg",
+    "安踏 氢跑鞋 5.0 男款": "28.jpg",
+    "斯伯丁 7号 标准篮球": "29.jpg",
+    "迪卡侬 羽毛球拍对拍套装": "30.jpg",
+    "《三体》全集（纪念版）": "31.jpg",
+    "网易严选 人体工学椅 经典款": "32.jpg",
+    "苏泊尔 不粘炒锅 32cm": "33.jpg",
+    "小米米家台灯 Pro": "34.jpg",
+    "优衣库 摇粒绒外套（男）": "35.jpg",
+    "兰蔻 小黑瓶精华肌底液 100ml": "36.jpg",
+    "飞利浦 电动牙刷 HX6730": "37.jpg",
+    "蒙牛 特仑苏 纯牛奶 250ml×24盒": "38.jpg",
+    "乐高 保时捷911 GT3 RS 积木": "39.jpg",
+    "星巴克 经典随行杯 473ml": "40.jpg",
+}
+
+
+def _product_image(name: str) -> str | None:
+    """商品展示图相对 URL（随前端静态伺服），未配图返回 None（前端用占位图兜底）。"""
+    fname = PRODUCT_IMAGES.get(name)
+    return f"/price-agent/images/products/{fname}" if fname else None
+
+
 async def seed_user(session, spec: dict) -> None:
     """单个演示账号：建用户（幂等）→ 建画像（幂等）→ 灌演示数据（幂等）。"""
     email = spec["user_email"]
@@ -168,7 +223,7 @@ async def seed_user(session, spec: dict) -> None:
 
     # 3.1) 购物车候选清单（未购买，无 platform / purchased_at）
     cart_rows = [
-        CartItem(user_id=user.id, category=c, name=n, price=p, specs=s, note=note)
+        CartItem(user_id=user.id, category=c, name=n, price=p, specs=s, note=note, image=_product_image(n))
         for n, c, p, s, note in CART_ITEMS
     ]
     # 3.2) 物品库 + 消费记录（同一件商品配套生成，口径与 transfer_to_owned_item 一致）
@@ -177,7 +232,7 @@ async def seed_user(session, spec: dict) -> None:
         owned_rows.append(
             OwnedItem(
                 user_id=user.id, category=category, name=name, price=price, specs=specs,
-                platform=platform, purchased_at=purchased_at, note=note,
+                platform=platform, purchased_at=purchased_at, note=note, image=_product_image(name),
             )
         )
         record_rows.append(
