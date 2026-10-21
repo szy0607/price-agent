@@ -1,0 +1,38 @@
+# ── Docker 构建上下文排除清单（deploy/ 的两个 Dockerfile 共用）──
+# 目的：减小构建上下文体积；【关键】防止本地开发密钥 .env 被打进镜像
+
+# 版本控制与 IDE
+.git
+.gitignore
+.idea
+.vscode
+.github
+
+# Python 缓存
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+
+# 本地开发密钥（绝不进镜像）
+.env
+deploy/.env
+
+# 前端依赖与构建产物（镜像内会重新 npm ci / npm run build）
+node_modules
+**/node_modules
+frontend-web/dist
+frontend/dist
+dist
+
+# 运行时数据与工作文件
+uploads
+.venv
+.agent
+.workbuddy
+.screenshots
+postman
+docs
+tests
+sysdoc_work
+*.docx
+*.log
