@@ -26,6 +26,9 @@
 # fastapi：低于 0.100 不支持 pydantic v2，会被拖回 v1（用法完全不同）
 fastapi>=0.110
 httpx>=0.27
+# python-multipart：FastAPI 处理 multipart 表单（UploadFile 文件上传）必需；
+#   缺了启动时直接报 "Form data requires python-multipart to be installed"
+python-multipart>=0.0.9
 # uvicorn[standard]：[standard] 才带 --reload(watchfiles)/httptools；
 #   Windows 上不含 uvloop（uvloop 仅 *nix），别指望它在 Windows 生效
 uvicorn[standard]>=0.29
@@ -80,3 +83,4 @@ bcrypt>=4.1
 #   ⚠️ 它的连接串 scheme 是 **postgresql+asyncpg**，不是 mysql+aiomysql 那种写法
 asyncpg>=0.29
 langgraph>=1.2.4
+
