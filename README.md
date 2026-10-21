@@ -2,28 +2,11 @@
 
 个人定制购物助手：通过对话理解用户需求（预算、平台偏好、学生身份、性价比 / 品质取向），维护个人购物车与物品库参数档案，AI 联网补全商品参数，并记录个人消费流水。**AI 是顾问，不是代购——下单与支付 100% 由用户自己完成。**
 
-> 版本口径：设计方案 v0.8（2026-10-02 消费记录拍板）。价格情报线已按 v0.8 决策删除：不做联盟 API 比价、不承诺实时最低价；价格只来自用户自记与 AI 补全的网络参考价（带提示、可修改）。
-
 ---
 
-## 在线体验（比赛 / 评委入口）
+## 项目状态
 
-完整生产环境已部署（后端 + 数据库 + RAG 索引链路 + 前端，Docker Compose 七容器）：
-
-> **http://47.93.117.76/price-agent/**
-
-**请使用演示账号登录**（已预置完整演示数据与模型 Key，开箱即用，无需注册、无需配置）：
-
-| 账号 | 密码 | 预置数据 |
-|---|---|---|
-| `demo@example.com` | `Demo2026` | 购物车 20 件（带商品图）+ 物品库 / 消费记录各 20 条 + 用户画像 + 默认对话 / 向量模型 Key |
-| `demo2@example.com` | `Demo2026` | 同上（独立数据，供两人同时演示） |
-
-> 演示商品图（40 张 AI 生成白底电商图）经 nginx 静态目录公开伺服，绑定 demo / demo2 账号商品数据；新注册账号无演示数据（真实产品行为）。模型 Key 由部署环境自动注入并加密落库，评委登录即可直接聊天 / AI 联网补全 / RAG 语义检索，无需进设置页。
-
-**纯前端演示版**（GitHub Pages，无后端）：https://szy0607.github.io/price-agent/
-
-> 在线版为纯前端演示：注册 / 登录 / 验证码、购物车 / 物品库 / 消费记录等业务功能均需搭配本地后端（`127.0.0.1:8000`）联调；业务页进入需先登录（在线演示页登录态暂存 localStorage）。
+项目已完成开发并打包交付。体验完整功能，请按「本地开发」章节自行部署运行。
 
 ---
 
@@ -42,9 +25,7 @@
 | 账号系统（后端） | 注册 / 登录 + 图形验证码（人机验证）、bcrypt 密码哈希、Cookie 会话（`user_sessions`，token 哈希落库）、登出、`/auth/me` | ✅ 已落地 |
 | 设置 `/settings` | 用户自定义模型供应商（`provider` / `base_url` / `model_name`）、默认 Key 管理；API Key 以 AES-256-GCM 加密存储、脱敏展示 | ✅ 已落地 |
 | 图片上传 | 商品展示图上传（2MB 上限 + 限流）、访问统一收口鉴权（登录 + 归属校验）、生命周期自动清理（后台定时任务，幂等） | ✅ 已落地 |
-| **演示商品图** | 40 张 AI 生成白底电商图绑定 demo / demo2 账号（购物车 01–20、物品库 21–40），nginx 静态公开伺服 | ✅ 已落地 |
-
-> 📌 **心愿单**：2026-10-18 大宋拍板**不做** —— v0.7 的「购物分组 + 物品库」已经覆盖了「想买 vs 已买」的区分。占位路由与 `ComingSoonView.vue` 已删除。
+| **演示商品图** | 40 张 AI 生成白底电商图（购物车 01–20、物品库 21–40），nginx 静态伺服，seed 脚本可绑定演示数据 | ✅ 已落地 |
 
 ---
 
@@ -74,7 +55,7 @@ flowchart LR
 | 索引链路三进程 | Web 把商品写进 Redis 队列 → arq worker 消费并写向量到 PG → reaper 每 5 分钟补偿僵死 / 失败任务；缺任一进程商品会卡 `PENDING` 且不报错 |
 | 前端固定 `/price-agent/` | Vite `base=/price-agent/`，nginx 按路径分流：`/price-agent/` 走静态 SPA（history 路由兜底），其余全部反代后端；SSE 流式对话关缓冲（`proxy_buffering off`） |
 | 后端单 worker | 限流与 A5 日限次是**进程内计数**，多 worker 会稀释配额 N 倍（刻意 `--workers 1`） |
-| 图片双通道 | 演示商品图 → nginx 静态目录（公开，绑定 demo 账号数据）；用户上传图 → 后端 `/uploads/`（登录 + 归属鉴权，仅本人可见） |
+| 图片双通道 | 演示商品图 → nginx 静态目录（seed 脚本绑定演示数据）；用户上传图 → 后端 `/uploads/`（登录 + 归属鉴权，仅本人可见） |
 
 ---
 
@@ -83,7 +64,6 @@ flowchart LR
 | 模块 | 技术栈 |
 |------|--------|
 | 网页版前端 | Vue 3.5 + Vite 5 + Tailwind 4 + Phosphor Icons + Vue Router 4 |
-| 移动版 Demo | Vue 3 + Vite 5 + Vant 4（参考工程） |
 | 后端 | Python 3.10 + FastAPI + 异步 SQLAlchemy 2.0 + Pydantic v2 + bcrypt + Pillow（验证码） |
 | 业务数据库 | MySQL 8（唯一事实源，库名 `price_agent`，utf8mb4 / UTC 时区口径） |
 | 向量 / 队列 | PostgreSQL 16 + pgvector（embedding 副本）；Redis 7 + arq（索引任务队列） |
@@ -100,9 +80,8 @@ flowchart LR
 
 ```text
 price-agent/
-├── frontend-web/               # 网页版前端（Vue 3 + Vite + Tailwind 4）
+├── frontend-web/               # 网页版前端（Vue 3 + Vite + Tailwind 4，唯一正式前端）
 │   └── public/images/          # 静态图片（placeholder 占位图 + products/ 40 张演示商品图）
-├── frontend/                   # 移动版 Demo（Vue 3 + Vant 4，参考工程）
 ├── app/                        # 后端（FastAPI + 异步 SQLAlchemy）
 │   ├── agents/                 # 多智能体（a1_graph.py：A1 编排图，5 节点）
 │   ├── core/                   # 配置（.env）、安全（bcrypt）、图形验证码、Cookie 会话、限流、日志、错误处理、中间件、trace、Key 加密、HTTP 客户端
@@ -121,16 +100,12 @@ price-agent/
 │   ├── nginx.conf              # 静态伺服 + API 反代 + SSE 流式
 │   ├── .env.example            # 生产密钥模板（cp 为 .env 后填真实值）
 │   └── README.md               # 部署指南（服务器准备 / 启动 / HTTPS / 备份 / 2C2G 要点）
-├── alembic/                    # 数据库迁移（versions/，17 个迁移文件）
+├── alembic/                    # 数据库迁移（versions/，20 个文件：19 个迁移 + 1 个 merge）
 ├── docs/                       # 接口契约与设计文档
-├── scripts/                    # 脚本（seed_user13_data.py 素材集、seed_demo.py 幂等演示数据）
+├── scripts/                    # 辅助脚本：seed_demo.py（幂等演示数据）/ seed_user13_data.py（素材集）/ clear_arq_queue.py（清理 arq 队列）/ pg_init.sql（PG 建库初始化）
 ├── tests/                      # 后端测试（pytest + pytest-asyncio）
-├── postman/                    # Postman 环境 / 全局变量
-├── static/                     # Swagger / ReDoc 静态资源
+├── static/                     # Swagger / ReDoc 文档静态资源（swagger-ui-bundle.js / swagger-ui.css / redoc.standalone.js，后端 /docs /redoc 渲染依赖）
 ├── uploads/                    # 用户上传图片（运行时生成，不入 Git）
-├── .github/workflows/deploy.yml # GitHub Pages 自动部署
-├── 智能电商采购Agent-设计方案.md  # 设计方案底稿（v0.8）
-├── 开发流程.md                   # 开发流程与合规红线
 ├── AGENTS.md                   # 数据库协作守则（AI 协作者必读）
 ├── requirements.txt            # 后端运行依赖
 ├── requirements-dev.txt        # 后端开发 / 测试依赖
@@ -143,22 +118,32 @@ price-agent/
 
 ### 后端服务（app）
 
-后端运行环境为 conda 环境 `fast`（Python 3.10），在项目根目录执行：
+后端要求 **Python 3.10+**。建议用 conda 创建独立环境，在项目根目录执行：
 
 ```cmd
-conda activate fast
-cd /d F:\price-agent
-pip install -r requirements-dev.txt   # 开发（含测试依赖）
-alembic upgrade head                   # 执行数据库迁移（见 AGENTS.md 开工三步）
-python -m uvicorn app.main:app --port 8000 --reload --no-access-log   # http://127.0.0.1:8000
+cd <项目根目录>
+conda activate <你的 Python 3.10 环境名>   # 或激活已有的虚拟环境
+pip install -r requirements-dev.txt        # 安装依赖（含测试依赖）
+alembic upgrade head                       # 初始化 / 更新 MySQL 表结构
+python -m uvicorn app.main:app --port 8000 --reload --no-access-log   # 启动后端，访问 http://127.0.0.1:8000
 ```
 
-> `--no-access-log`：关闭 uvicorn 原生的状态码行（无时间戳 / trace_id），避免与 `app.access` 访问日志重复。备选 `fastapi run --port 8000`（功能正常，但控制台不显示 `app.access` 日志）。
+> 前置准备：本机需有 MySQL 8、Redis、PostgreSQL 16（含 pgvector）；首次运行前把 `.env.example` 复制为 `.env` 并按实际连接信息修改（`.env` 不入库）。
+> `--no-access-log`：关闭 uvicorn 自带的状态码行，避免与项目自定义访问日志重复；备选 `fastapi run --port 8000`。
+
+**RAG 索引链路（另开两个终端，长驻进程，缺一不可）**：
+
+```cmd
+arq app.worker.WorkerSettings          # 索引 worker：消费 Redis 队列写 PG 向量（不启动则商品状态永远 PENDING，不报错）
+python -m app.worker_reaper            # 定时检测（reaper）：每 5 分钟扫僵死 / 失败索引任务，启动即扫第一轮
+```
+
+> uvicorn / worker / reaper 三个都是长驻进程，各占一个终端窗口；worker 与 reaper 依赖 Redis 与 PG（端口以 `.env` 为准，本项目 PG 是 **5433** 不是 5432）。详见 `docs/启动命令.md` §6。
 
 ### 网页版前端（frontend-web）
 
 ```cmd
-cd /d F:\price-agent\frontend-web
+cd frontend-web
 npm install
 npm run dev      # 开发服务器 http://localhost:5174/price-agent/
 npm run build    # 构建产物 dist/
@@ -166,15 +151,6 @@ npm test         # node --test tests/*.test.mjs
 ```
 
 > 开发服务器已配置代理，API 前缀全部转发到本地后端 `http://127.0.0.1:8000`（`/auth` `/setting` `/chat` `/conversations` `/purchase-records` `/cart` `/items` `/groups` `/upload`）——**本地用 Vite 当"前台"替代 nginx**，后端必须起在 **8000** 端口才通。生产则用 nginx 承担同一职责（见「系统架构」）。
-
-### 移动版 Demo（frontend，可选）
-
-```cmd
-cd /d F:\price-agent\frontend
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # 产物 dist/
-```
 
 ### 后端测试
 
@@ -190,7 +166,7 @@ pytest
 python scripts/seed_demo.py
 ```
 
-幂等脚本：先查后插，重复执行只打印 `[skip]`。预置 `demo@example.com` / `demo2@example.com`（密码 `Demo2026`）两个演示账号 + 购物车 / 物品库 / 消费记录 / 画像 / 默认模型 Key。
+幂等脚本：先查后插，重复执行只打印 `[skip]`。预置两个演示账号（`demo@example.com` / `demo2@example.com`，密码 `Demo2026`）+ 购物车 / 物品库 / 消费记录 / 画像 / 默认模型 Key，**仅用于本地开发联调，不对外提供**。
 
 ### 数据库迁移
 
@@ -234,6 +210,9 @@ python scripts/seed_demo.py
 | `/setting/api-keys` | GET / POST | 列出（脱敏，仅 `key_suffix`）/ 新增（AES-256-GCM 加密落库；新增即默认） |
 | `/setting/api-keys/{id}` | PUT / DELETE | 更新 / 删除（删除默认 Key 不转移默认） |
 | `/setting/api-keys/{id}/default` | PUT | 设为默认 Key |
+| `/setting/embedding-keys` | GET / POST | 向量模型 Key 列表 / 新增（加密落库；新增即默认） |
+| `/setting/embedding-keys/{id}` | PUT / DELETE | 更新 / 删除（删除默认不转移） |
+| `/setting/embedding-keys/{id}/default` | PUT | 设为默认向量 Key |
 
 ### 购物车 / 物品库 / 消费记录
 
@@ -260,7 +239,9 @@ python scripts/seed_demo.py
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | `/chat/message` | POST | 发送对话消息：`conversation_id` 懒创建（首条传 `null`，返回真实 id）+ `text` + `item_refs`（购物车/物品库商品引用，按登录用户反查展开，查不到即 40001）；user 消息先落库再调模型，失败也留痕 |
+| `/chat/stream` | POST | SSE 流式对话（`text/event-stream`）：入参同 `/chat/message`；客户端必须 `fetch` + `ReadableStream`，**禁止 `EventSource`**（只支持 GET、不带自定义头，过不了同源校验，见 `docs/流式输出-设计.md` §5.8） |
 | `/conversations` | GET | 当前用户的会话列表（按最近更新排序，`limit` 1~100 默认 50） |
+| `/conversations/rag-index-status` | GET | RAG 索引状态（对话页提示条数据源，返回三个字段，前端据此给不同文案） |
 | `/conversations/{id}/messages` | GET | 会话历史消息（按时间正序，`limit` 1~500 默认 200；越权会话统一报「会话不存在」） |
 | `/conversations/{id}/title` | PATCH | 修改会话标题（归属校验：必须同时匹配 id 与 user_id） |
 | `/upload/image` | POST | 上传商品展示图（分块读 + 2MB 硬上限，每用户 60s 10 次限流；落盘即登记 `image` 表） |
@@ -287,7 +268,7 @@ docker compose ps          # 7 个容器全部 Up / healthy 即正常
 docker exec -w /app pa-backend python scripts/seed_demo.py
 # 6. 验证
 curl -s http://127.0.0.1/health      # {"code":0,...,"status":"ok"}
-# 浏览器打开 http://<服务器IP>/price-agent/，用 demo 账号登录
+# 浏览器打开 http://<服务器IP>/price-agent/，注册账号登录验证
 ```
 
 **2C2G 小内存服务器注意**（本项目的实际部署环境）：
@@ -314,7 +295,7 @@ cd deploy && docker compose up -d --build
 
 | 文档 | 说明 |
 |------|------|
-| `deploy/README.md` | 生产部署指南（服务器准备 / 密钥 / 启动 / HTTPS / 备份 / 2C2G 要点 / 演示账号） |
+| `deploy/README.md` | 生产部署指南（服务器准备 / 密钥 / 启动 / HTTPS / 备份 / 2C2G 要点） |
 | `docs/用户注册与登录-接口契约.md` | 注册登录接口契约（含验证码 §2.5、错误码） |
 | `docs/登录人机验证与登录态-设计.md` | 人机验证与登录态设计 |
 | `docs/第三方API-Key加密存储.md` | 用户 API Key 加密、模型选择、咨询调用与轮换操作 |
@@ -340,20 +321,7 @@ cd deploy && docker compose up -d --build
 | **M1 多 Agent（LangGraph）** | 🟢 **A1 编排图已落地**（`app/agents/a1_graph.py`，5 节点）：`decide` 自主路由到 `search`（RAG 检索）/ `compare`（A4 参数对比）/ `recommend`（A5 画像推荐，走博查联网）/ `card`（商品卡片）。详见 `docs/Agent编号约定.md` §4 |
 | **M3 数据与 RAG** | 🟢 **已落地**（PostgreSQL 16 + pgvector、Redis）：向量索引链路（arq worker + reaper 补偿）+ 语义检索（按用户问题选维度、分维度对比） |
 | M5 真实联盟 API | ✅ 已按 v0.8 拍板删除价格情报线（不做联盟 API 比价；价格 = 用户自记 + AI 网络参考价） |
-| **生产部署上线** | ✅ Docker Compose 七容器部署于阿里云 2C2G（公网 http://47.93.117.76/price-agent/）；演示账号 + 40 张商品图 + 模型 Key 注入已就位 |
-| M6 安全合规加固 / M7 上线 | ⬜ 未开始 |
-
-### 已知问题与取舍（2026-10-19 真机联调后）
-
-| 项 | 说明 |
-|---|---|
-| 对比耗时 18 秒 | 博查 1.1s + 取参 7.5s + 维度对比 9.5s。**大宋拍板接受**，靠 agent 过程提示兜住体验 |
-| 商品卡片已停用 | `web_search` 返回的是**网页**不是商品，同一商品的多个页面被渲染成多张卡片。取数问题另修（`search_filter`），卡片代码保留，`can_card = False` 一行可恢复 |
-| A5 日限次未做 | 大宋拍板暂不做。⚠️ **上多 worker 前必须补**（`rate_limit` 是进程内的，多 worker 会稀释 N倍） |
-| `rag_min_score` 是初值 | 0.4 是语料只有 1 条时定的，等向量灌满后重新校准 |
-| 2C2G 构建慢 | `vite build` 在 2G 内存下极慢，前端镜像**必须串行构建**（见「生产部署」注意点 3） |
-
----
+| **生产部署上线** | ✅ Docker Compose 七容器已完成部署并打包交付（阿里云 2C2G）；40 张商品图 + 模型 Key 注入已就位 |
 
 ## 合规说明
 

@@ -155,56 +155,13 @@ docker run --rm -v price-agent_uploads_data:/data -v "$PWD":/backup alpine tar c
 5. **别在这台机器上再跑其他重服务**（Java 后端、桌面环境等）；监控内存：`docker stats`。
 6. 如果以后要开多 worker 或上真实并发，再升到 2C4G —— 目前单 worker + 个人使用完全够。
 
-## 11. 演示账号（比赛 / 评委用）
+## 11. 演示数据（可选，仅本地 / 内部验证）
 
-部署完成后，执行一次幂等 seed 脚本，服务器上就有能直接登录的演示账号和完整演示数据：
+系统不再对外提供演示账号与公开访问。如需在本地或内部环境灌入演示数据做功能验证，执行一次幂等 seed 脚本（先查后插，重复执行只会打印 `[skip]`）：
 
 ```bash
 docker exec -w /app pa-backend python scripts/seed_demo.py
 ```
 
-> 脚本幂等：先查后插，重复执行只会打印 `[skip]`，不会产生重复数据或报错。
 > 本地开发环境同样可跑：`python scripts/seed_demo.py`（conda fast，项目根）。
-> 本仓库的 `deploy/.env` 已预填好模型 key 注入变量（见下），服务器上直接用即可。
-
-| 账号 | 密码 | 预置数据 |
-|---|---|---|
-| `demo@example.com`（演示账号） | `Demo2026` | 购物车 20 条 + 物品库/消费记录 20 条 + 用户画像 + 默认模型 key |
-| `demo2@example.com`（演示账号2） | `Demo2026` | 同上（独立数据，供两人同时演示） |
-
-**模型 key 自动注入（开箱即用）**：`deploy/.env` 里已填好下面两组变量，
-seed 执行时会自动给两个演示账号写入【默认】对话模型 key 与向量模型 key（加密落库），
-评委登录即可直接聊天 / AI 补全 / RAG 检索，无需进设置页：
-
-```env
-DEMO_MODEL_PROVIDER / DEMO_MODEL_BASE_URL / DEMO_MODEL_NAME / DEMO_MODEL_KEY      # 对话模型（复用本地 deepseek-flash）
-DEMO_EMBEDDING_PROVIDER / DEMO_EMBEDDING_BASE_URL / DEMO_EMBEDDING_NAME / DEMO_EMBEDDING_KEY  # 向量模型（复用本地千问）
-```
-
-> 每组四个变量【全部】填写才生效，缺任一整组跳过（宁缺毋滥，避免写半截配置）。
-> 不想要自动注入时，把对应变量删掉即可，改为登录后设置页手动配置。
-
-**比赛演示前检查**（其余依赖）：
-1. 三个进程都在跑：`docker compose ps`（backend / worker / reaper）
-2. 登录任一演示账号 → 聊天页发一条消息验证模型连通（key 无效会被标记失效，需在设置页重配）
-
-清掉演示账号重来（可选）：先删该用户关联数据再删用户，然后重跑 seed：
-```bash
-docker exec -w /app pa-backend python -c "
-import asyncio
-from sqlalchemy import delete, select
-from app.database.session import async_session_local
-from app.models import CartItem, OwnedItem, PurchaseRecord, UserProfile, User
-async def m():
-    async with async_session_local() as s:
-        for em in ('demo@example.com', 'demo2@example.com'):
-            u = (await s.execute(select(User).where(User.user_email == em))).scalar_one_or_none()
-            if not u:
-                continue
-            for M in (CartItem, OwnedItem, PurchaseRecord, UserProfile):
-                await s.execute(delete(M).where(M.user_id == u.id))
-            await s.execute(delete(User).where(User.id == u.id))
-        await s.commit()
-asyncio.run(m())
-"
-```
+> 脚本会创建两个预置演示账号（含购物车 / 物品库 / 消费记录 / 用户画像 / 默认模型 Key），供内部开发与联调使用，不对外提供。

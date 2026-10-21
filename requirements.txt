@@ -16,7 +16,7 @@
 #      需要精确复现时用 requirements.lock.txt（或 uv lock）锁定。
 #
 # 🔴 **LangGraph 一族（2026-10-17 已列入）**：
-#   RAG 读取侧从「固定前置」改成工具化后，编排走 LangGraph（`app/agents/rag_graph.py`）。
+#   RAG 读取侧从「固定前置」改成工具化后，编排走 LangGraph（`app/agents/a1_graph.py`，10-18 由 rag_graph.py 改名）。
 #   实测版本：langgraph 1.2.4 / langchain-core 1.4.2。
 #   ⚠️ **1.x 与网上 0.x 教程 API 不同**，且默认 recursion_limit 是 10007 不是 25 ——
 #      详见 docs/RAG索引任务-设计.md §8.2 的三条硬约束。
