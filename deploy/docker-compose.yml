@@ -29,6 +29,11 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+    # 对外直连 MySQL（演示/管理用）：映射到宿主机所有网卡
+    # ⚠️ 必须同时：① 安全组 3306 只放行自己/评委 IP（别开 0.0.0.0/0）
+    #             ② 用 price_app 账号连接（密码在 deploy/.env 的 MYSQL_APP_PASSWORD），勿用 root
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
