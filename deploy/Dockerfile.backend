@@ -10,12 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+# 不装 curl：健康检查用 Python 标准库 urllib 实现（compose 的 healthcheck 已改），
+# 避免构建时 apt 访问 Debian 官方源（海外）在国内服务器上超时失败
 WORKDIR /app
-
-# curl 用于容器健康检查（compose 的 healthcheck 会调 /health）
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
 
 # 先拷依赖清单并安装 —— 依赖层可被 Docker 缓存复用，改业务代码不用重装
 COPY requirements.txt .
