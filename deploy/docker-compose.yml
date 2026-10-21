@@ -19,7 +19,7 @@ services:
     container_name: pa-mysql
     restart: unless-stopped
     # 2C2G 服务器内存预算：见 deploy/README.md §10（cap 是上限不是预占）
-    mem_limit: 384m
+    mem_limit: 512m
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?deploy/.env 里必须填 MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: price_agent
@@ -29,6 +29,7 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+      - --innodb-buffer-pool-size=96M
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -83,7 +84,7 @@ services:
       dockerfile: deploy/Dockerfile.backend
     container_name: pa-backend
     restart: unless-stopped
-    mem_limit: 384m
+    mem_limit: 512m
     env_file: ./.env
     environment:
       # 容器内通过服务名访问各数据库（服务名即 DNS 名）
